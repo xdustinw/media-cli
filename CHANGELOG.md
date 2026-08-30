@@ -29,16 +29,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Tag writes never alter pixels or streams: video is remuxed with stream copy;
     images get a native text record (PNG `tEXt`, JPEG `COM`, GIF comment, WebP
     `mcTG` chunk) added via `internal/imgmeta`.
-  - Files already tagged and correctly named are skipped. If a stale `mc.hash`
-    is found (tag present but no longer matching the content), it prints a
-    warning and re-tags. The preview's `reason` column shows `new`,
-    `rename only`, or `content hash changed`.
-- **`mc list <folder> [flags]`**: recursive listing of a folder's files, one
-  flat row each: `filename`, `size` (human readable), `mc.hash`, `rating`,
-  `authors`, `tags`. `mc.hash` is read from container metadata (video) or the
-  imgmeta record (images).
-  - `--meta=title,make,...` adds metadata columns; `--format=toon|json|csv`
-    (toon and csv are tabular; csv rows carry absolute paths).
+  - By default a file that already has a valid `mc.hash` tag is trusted and not
+    re-hashed — the stored value is used directly, making re-runs on large,
+    already-processed folders near-instant (and rename-only files are moved, not
+    remuxed). `-f` / `--force` re-computes every hash and compares it with the
+    stored tag, flagging any mismatch.
+  - The per-file preview (hash + planned name, `+`/`»`/`~`/`=` glyph) is printed
+    as each file is processed, so progress shows on large folders.
+- **`mc list <folder> [flags]`**: recursive listing. Each file row is
+  `filename`, `size` (human readable), `mc.hash`, `rating`, `authors`, `tags`.
+  `mc.hash` is read from container metadata (video) or the imgmeta record
+  (images).
+  - `--format=toon|json` nests the rows under their folders
+    (`"tmp/" → "video/" → files[N]{...}`); `--format=csv` is one flat table with
+    absolute paths.
+  - `--meta=title,make,...` adds metadata columns.
   - `--select='name=sample* and rating>=4 and size>1g and modifiedAt>2026-08-01'`
     filters — fields `name/path/size/modifiedAt/rating/kind/format/authors/tags`
     or any metadata key, operators `= != > < >= <=` (globs on `=`), size

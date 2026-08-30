@@ -20,8 +20,9 @@ var (
 var listCmd = &cobra.Command{
 	Use:   "list <folder>",
 	Short: "List media files in a folder with size and metadata",
-	Long: `list walks <folder> recursively and prints one flat row per file:
+	Long: `list walks <folder> recursively. Each file row is:
 filename, size, mc.hash, rating, authors, tags.
+toon/json nest the rows under their folders; csv is one flat table (absolute paths).
 
   --meta      extra metadata columns, comma separated (e.g. --meta=title,make,model)
   --select    keep only matching files, e.g.

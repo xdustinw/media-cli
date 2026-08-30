@@ -170,7 +170,7 @@ no GPL/nonfree parts. Compliance is handled by:
 | `internal/render/` | TOON / JSON / CSV output, order-preserving |
 | `internal/selfupdate/` | `mc update`: release lookup + in-place binary replacement |
 | `internal/media/` | file discovery, video/image classification, safe rename |
-| `internal/toon/` | TOON preview encoder (hash/update previews) |
+| `internal/toon/` | small TOON encoder for the `mc update` preview |
 | `internal/config/`, `internal/logging/` | Viper / slog setup |
 | `scripts/build-ffmpeg.sh` | vendored FFmpeg builder |
 | `third_party/ffmpeg/<goos>_<goarch>/` | static FFmpeg libs + headers (only `linux_amd64` committed) |
@@ -183,4 +183,5 @@ no GPL/nonfree parts. Compliance is handled by:
 - Return errors from packages; handle them at the CLI surface.
 - `slog` for logging; stdout for output, stderr for logs/errors.
 - `context.Context` for cancellation (Ctrl-C).
-- Any file mutation shows a TOON preview and asks for confirmation unless `-y`.
+- Any file mutation shows a preview and asks for confirmation unless `-y`
+  (`mc hash` streams the preview per file; `mc update` uses a TOON block).

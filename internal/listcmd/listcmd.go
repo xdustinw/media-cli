@@ -4,6 +4,7 @@ package listcmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -49,7 +50,8 @@ func (o Options) columns(extra []string) []string {
 	return append(cols, extra...)
 }
 
-// Run walks Root, filters and sorts, and writes the listing.
+// Run walks Root, filters and sorts, and writes the listing. CSV output is a
+// flat table with absolute paths; TOON and JSON nest files under their folders.
 func Run(ctx context.Context, o Options) error {
 	log := o.Logger
 	if log == nil {
@@ -98,57 +100,156 @@ func Run(ctx context.Context, o Options) error {
 	extra := dedupeMeta(o.Meta, o.hashKey())
 	columns := o.columns(extra)
 	absRoot, _ := filepath.Abs(o.Root)
-	tbl := render.Table{Columns: columns}
-	for _, f := range files {
-		tbl.Rows = append(tbl.Rows, row(f, absRoot, o.hashKey(), extra, o.Format))
+
+	if o.Format == render.CSV {
+		tbl := render.Table{Columns: columns}
+		for _, f := range files {
+			tbl.Rows = append(tbl.Rows, csvRow(f, absRoot, o.hashKey(), extra))
+		}
+		return tbl.Encode(o.Stdout, render.CSV)
 	}
 
-	if o.Format == render.TOON {
-		fmt.Fprintf(o.Stdout, "%d file(s)\n", len(files))
+	// TOON / JSON: nest files beneath their folders.
+	root := &treeNode{}
+	for _, f := range files {
+		node := root.walk(relDirParts(absRoot, f.Abs))
+		node.files = append(node.files, f)
 	}
-	return tbl.Encode(o.Stdout, o.Format)
+	doc := render.NewOM(rootLabel(absRoot), root.render(o.hashKey(), extra))
+
+	if o.Format == render.JSON {
+		enc := json.NewEncoder(o.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(doc)
+	}
+
+	fmt.Fprintf(o.Stdout, "%d file(s)\n", len(files))
+	s, err := doc.TOON()
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(o.Stdout, s+"\n")
+	return err
 }
 
-func row(f *mediainfo.File, absRoot, hashKey string, meta []string, format render.Format) []any {
-	name := f.Abs
-	if format != render.CSV { // CSV always carries the absolute path
-		if rel, err := filepath.Rel(absRoot, f.Abs); err == nil {
-			name = rel
-		}
+// treeNode is one directory in the output hierarchy.
+type treeNode struct {
+	subs  map[string]*treeNode
+	files []*mediainfo.File
+}
+
+func (n *treeNode) child(name string) *treeNode {
+	if n.subs == nil {
+		n.subs = map[string]*treeNode{}
+	}
+	c := n.subs[name]
+	if c == nil {
+		c = &treeNode{}
+		n.subs[name] = c
+	}
+	return c
+}
+
+func (n *treeNode) walk(parts []string) *treeNode {
+	cur := n
+	for _, p := range parts {
+		cur = cur.child(p)
+	}
+	return cur
+}
+
+// render turns the node into an ordered map: sub-directories (sorted) as keys,
+// then a `files` key holding the tabular rows for this directory's own files.
+func (n *treeNode) render(hashKey string, extra []string) *render.OM {
+	o := render.NewOM()
+
+	names := make([]string, 0, len(n.subs))
+	for name := range n.subs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		o.Set(name+"/", n.subs[name].render(hashKey, extra))
 	}
 
+	if len(n.files) > 0 {
+		rows := make([]*render.OM, len(n.files))
+		for i, f := range n.files {
+			rows[i] = fileOM(f, hashKey, extra)
+		}
+		o.Set("files", rows)
+	}
+	return o
+}
+
+func fileOM(f *mediainfo.File, hashKey string, extra []string) *render.OM {
+	hash, _ := f.Meta(hashKey)
+	var rating any = ""
+	if r, ok := f.Rating(); ok {
+		rating = r
+	}
+	o := render.NewOM(
+		"filename", f.Name,
+		"size", mediainfo.HumanSize(f.Size),
+		hashKey, hash,
+		"rating", rating,
+		"authors", strings.Join(f.Authors(), "; "),
+		"tags", strings.Join(f.Tags(), "; "),
+	)
+	for _, m := range extra {
+		v, _ := f.Meta(m)
+		o.Set(m, v)
+	}
+	return o
+}
+
+func csvRow(f *mediainfo.File, absRoot, hashKey string, meta []string) []any {
+	hash, _ := f.Meta(hashKey)
 	var rating any
 	if r, ok := f.Rating(); ok {
 		rating = r
 	}
-	hash, _ := f.Meta(hashKey)
-
 	cells := []any{
-		name,
+		f.Abs, // CSV always carries the absolute path
 		mediainfo.HumanSize(f.Size),
 		hash,
 		rating,
-		cell(f.Authors(), format),
-		cell(f.Tags(), format),
+		strings.Join(f.Authors(), "; "),
+		strings.Join(f.Tags(), "; "),
 	}
 	for _, m := range meta {
-		if v, ok := f.Meta(m); ok {
-			cells = append(cells, v)
-		} else {
-			cells = append(cells, nil)
-		}
+		v, _ := f.Meta(m)
+		cells = append(cells, v)
 	}
 	return cells
 }
 
-// cell flattens a string list so every column stays a single scalar value: this
-// keeps CSV valid and lets TOON render one flat row per file (rather than a
-// nested object). JSON keeps the array.
-func cell(v []string, format render.Format) any {
-	if format == render.JSON {
-		return v
+// relDirParts returns the path components of abs's directory relative to
+// absRoot ("video", "video/clips", or nil for a file directly in the root).
+func relDirParts(absRoot, abs string) []string {
+	rel, err := filepath.Rel(absRoot, abs)
+	if err != nil {
+		return nil
 	}
-	return strings.Join(v, "; ")
+	dir := filepath.Dir(rel)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	var parts []string
+	for _, p := range strings.Split(filepath.ToSlash(dir), "/") {
+		if p != "" && p != "." {
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
+func rootLabel(absRoot string) string {
+	base := filepath.Base(absRoot)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		return absRoot + "/"
+	}
+	return base + "/"
 }
 
 func dedupeMeta(meta []string, hashKey string) []string {

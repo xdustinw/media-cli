@@ -6,6 +6,10 @@
 // streams (container metadata excluded). Still images are hashed over their
 // decoded pixels (EXIF/XMP/ICC/text excluded). Either way, editing metadata
 // does not change the hash.
+//
+// The preview of each file's hash and planned rename is printed as that file is
+// processed (rather than as one batch afterwards) so progress is visible on
+// large folders.
 package hashcmd
 
 import (
@@ -20,7 +24,6 @@ import (
 	"github.com/xdustinw/media-cli/internal/ffmpeg"
 	"github.com/xdustinw/media-cli/internal/imgmeta"
 	"github.com/xdustinw/media-cli/internal/media"
-	"github.com/xdustinw/media-cli/internal/toon"
 )
 
 // Options configures a Run.
@@ -30,6 +33,7 @@ type Options struct {
 	MetadataKey string // freeform tag key, e.g. "mc.hash"
 	NameLength  int    // hash prefix length used in the renamed filename
 	AssumeYes   bool   // skip the confirmation prompt
+	Force       bool   // re-hash files that already carry the tag (and compare)
 
 	Stdout  io.Writer
 	Stderr  io.Writer
@@ -55,6 +59,7 @@ type item struct {
 	newPath     string
 	existingTag string // current mc.hash value in the file, "" if none
 	hashChanged bool   // a mc.hash tag exists but no longer matches the content
+	trusted     bool   // hash taken from the existing tag, not recomputed
 	act         action
 }
 
@@ -79,6 +84,9 @@ func Run(ctx context.Context, o Options) error {
 	base := media.DisplayBase(o.Target)
 	log.Info("scanning", "target", o.Target, "files", len(files))
 
+	// Preview each file the moment it is hashed, so progress is visible.
+	fmt.Fprintf(o.Stdout, "Preview (%s):\n", o.MetadataKey)
+
 	items := make([]item, 0, len(files))
 	var scanErrs int
 	for _, f := range files {
@@ -93,21 +101,37 @@ func Run(ctx context.Context, o Options) error {
 			continue
 		}
 
-		log.Debug("hashing", "file", f, "kind", kind.String())
-		h, err := tg.Hash(f)
-		if err != nil {
-			scanErrs++
-			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), err)
-			continue
+		// Fast path: trust an existing, well-formed mc.hash tag and skip the
+		// (expensive) hashing entirely, unless --force asks to re-verify.
+		var h string
+		var trusted bool
+		if !o.Force {
+			if v, terr := tg.ReadTag(f, o.MetadataKey); terr == nil && looksLikeHash(v) {
+				h, trusted = v, true
+			}
+		}
+		if !trusted {
+			log.Debug("hashing", "file", f, "kind", kind.String())
+			hh, herr := tg.Hash(f)
+			if herr != nil {
+				scanErrs++
+				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), herr)
+				continue
+			}
+			h = hh
 		}
 
 		it := item{
-			path:   f,
-			rel:    media.RelTo(base, f),
-			kind:   kind,
-			tag:    tg,
-			hash:   h,
-			prefix: h[:o.NameLength],
+			path:    f,
+			rel:     media.RelTo(base, f),
+			kind:    kind,
+			tag:     tg,
+			hash:    h,
+			prefix:  h[:o.NameLength],
+			trusted: trusted,
+		}
+		if trusted {
+			it.existingTag = h // avoids a second ReadTag in classify
 		}
 		if media.AlreadyTagged(f, it.prefix) {
 			it.newPath = f // filename already carries the right short hash
@@ -116,41 +140,29 @@ func Run(ctx context.Context, o Options) error {
 		}
 		classify(o.MetadataKey, &it)
 		items = append(items, it)
+
+		fmt.Fprintln(o.Stdout, previewLine(base, o.MetadataKey, it))
 	}
 
 	if len(items) == 0 {
 		return fmt.Errorf("no files could be hashed (%d error(s))", scanErrs)
 	}
 
-	// 1. The plain listing the user asked for: <hash> - <relative path>
-	fmt.Fprintln(o.Stdout, "Computed hashes:")
-	for _, it := range items {
-		fmt.Fprintf(o.Stdout, "  %s - %s\n", it.hash, it.rel)
-	}
-
-	// Warn about files whose stored mc.hash no longer matches their content.
-	for _, it := range items {
-		if it.hashChanged {
-			fmt.Fprintf(o.Stderr, "  ⚠ %s: %s exists (%s) but the content hash changed to %s\n",
-				it.rel, o.MetadataKey, short(it.existingTag), short(it.hash))
-		}
-	}
-
 	pending := filterPending(items)
 	skipped := len(items) - len(pending)
+
+	fmt.Fprintf(o.Stdout, "\n%d file(s) — %d to update, %d up to date", len(items), len(pending), skipped)
+	if scanErrs > 0 {
+		fmt.Fprintf(o.Stdout, ", %d error(s)", scanErrs)
+	}
+	fmt.Fprintln(o.Stdout)
+
 	if len(pending) == 0 {
-		fmt.Fprintf(o.Stdout, "\nAll %d file(s) already tagged and named. Nothing to do.\n", skipped)
+		fmt.Fprintln(o.Stdout, "Nothing to do.")
 		return summaryErr(scanErrs)
 	}
 
-	// 2. TOON preview of the file mutations (per project convention).
-	if skipped > 0 {
-		fmt.Fprintf(o.Stdout, "\n%d file(s) already up to date, skipped.\n", skipped)
-	}
-	fmt.Fprintln(o.Stdout, "\nPlanned changes:")
-	fmt.Fprint(o.Stdout, buildPreview(base, o.MetadataKey, pending).String())
-
-	// 3. Confirmation, unless -y.
+	// Confirmation, unless -y.
 	if !o.AssumeYes {
 		ok := false
 		if o.Confirm != nil {
@@ -166,7 +178,7 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
-	// 4. Apply.
+	// Apply.
 	var applyErrs int
 	for _, it := range pending {
 		if err := ctx.Err(); err != nil {
@@ -190,8 +202,10 @@ func Run(ctx context.Context, o Options) error {
 // classify inspects the file's current tag and name and fills in it.existingTag,
 // it.hashChanged and it.act.
 func classify(key string, it *item) {
-	if v, err := it.tag.ReadTag(it.path, key); err == nil && v != "" {
-		it.existingTag = v
+	if it.existingTag == "" {
+		if v, err := it.tag.ReadTag(it.path, key); err == nil {
+			it.existingTag = v
+		}
 	}
 	tagMatches := it.existingTag == it.hash
 	it.hashChanged = it.existingTag != "" && !tagMatches
@@ -218,40 +232,38 @@ func filterPending(items []item) []item {
 	return out
 }
 
-func buildPreview(base, key string, items []item) *toon.Document {
-	doc := &toon.Document{}
-	doc.AddField("metadata_key", key)
-	tbl := toon.Table{
-		Name:    "changes",
-		Columns: []string{"file", "kind", "hash", "set_metadata", "rename_to", "reason"},
-	}
-	for _, it := range items {
-		rename := media.RelTo(base, it.newPath)
-		if it.newPath == it.path {
-			rename = "(unchanged)"
-		}
-		tbl.Rows = append(tbl.Rows, []string{
-			it.rel,
-			it.kind.String(),
-			it.hash,
-			fmt.Sprintf("%s=%s", key, it.hash),
-			rename,
-			reasonFor(it),
-		})
-	}
-	doc.AddTable(tbl)
-	return doc
-}
-
-func reasonFor(it item) string {
+// previewLine is the one line printed for a file the moment it is processed,
+// e.g. "  + video/a.mp4  <hash>  ->  video/a.8f9b6e.mp4". Leading glyph:
+//
+//	=  already tagged and named — nothing to do
+//	»  tag already correct, only the filename is stale (plain rename)
+//	~  mc.hash present but stale — rewritten
+//	+  no mc.hash yet — write it (and rename)
+func previewLine(base, key string, it item) string {
+	renameOnly := it.act != actionSkip && it.existingTag == it.hash
+	glyph := "+"
 	switch {
-	case it.hashChanged:
-		return "content hash changed"
-	case it.existingTag == it.hash:
-		return "rename only"
-	default:
-		return "new"
+	case it.act == actionSkip:
+		glyph = "="
+	case renameOnly:
+		glyph = "»"
+	case it.act == actionRetag:
+		glyph = "~"
 	}
+
+	line := fmt.Sprintf("  %s %s  %s", glyph, it.rel, it.hash)
+	switch {
+	case it.act == actionSkip:
+		// already tagged and named — nothing more to say
+	case it.newPath != it.path:
+		line += "  ->  " + media.RelTo(base, it.newPath)
+	default:
+		line += "  (tag only)"
+	}
+	if it.hashChanged {
+		line += fmt.Sprintf("   (stale %s %s replaced)", key, short(it.existingTag))
+	}
+	return line
 }
 
 // short returns the first 8 characters of a hex hash for display.
@@ -262,9 +274,28 @@ func short(h string) string {
 	return h
 }
 
+// looksLikeHash reports whether s is a 32-character lowercase-hex MD5 digest.
+func looksLikeHash(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // apply writes the tag into a sibling temp file, then moves it into place and
 // removes the original when the name changes.
 func apply(key string, it item) error {
+	// Fast path: the file already carries the exact tag we would write, so only
+	// the name is out of date — a plain rename, no remux / metadata rewrite.
+	if it.existingTag == it.hash && it.newPath != it.path {
+		return media.SwapInPlace(it.path, it.newPath, false)
+	}
+
 	tmp := filepath.Join(filepath.Dir(it.path),
 		fmt.Sprintf(".mc-%s%s", it.prefix, filepath.Ext(it.path)))
 	_ = os.Remove(tmp)
