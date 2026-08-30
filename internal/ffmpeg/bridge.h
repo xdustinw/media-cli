@@ -2,17 +2,22 @@
 #define MEDIA_CLI_BRIDGE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 // mc_stream_hash computes the MD5 of a media file's video and audio elementary
 // streams, ignoring all container metadata. It mirrors:
 //
 //   ffmpeg -i <file> -map 0:v? -map 0:a? -c copy -f hash -hash md5 -
 //
+// When max_bytes > 0 the copy stops once that many bytes of packet payload have
+// been fed to the hash (a bounded prefix hash — used by the fast "*-10m" hash
+// methods); max_bytes <= 0 hashes the whole file.
+//
 // On success it writes a lowercase 32-char hex digest (NUL terminated) into
 // out and returns 0. On failure it returns a negative AVERROR code and, when
 // errbuf is non-NULL, a human readable message.
 int mc_stream_hash(const char *filename,
-                   char *out, size_t out_size,
+                   char *out, size_t out_size, int64_t max_bytes,
                    char *errbuf, size_t errbuf_size);
 
 // mc_image_hash computes the MD5 of a still image's decoded pixel data,

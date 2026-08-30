@@ -85,6 +85,14 @@ func avError(op string, code C.int, errbuf *C.char) error {
 // elementary streams, independent of any container metadata. It is equivalent
 // to `ffmpeg -i <path> -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`.
 func StreamHash(path string) (string, error) {
+	return StreamHashLimit(path, 0)
+}
+
+// StreamHashLimit is StreamHash bounded to roughly the first maxBytes of copied
+// packet payload (maxBytes <= 0 hashes the whole file). It lets the fast
+// "*-10m" hash methods cap work on very large files at the cost of only
+// fingerprinting a prefix of the streams.
+func StreamHashLimit(path string, maxBytes int64) (string, error) {
 	cPath := C.CString(path)
 	defer C.free(unsafe.Pointer(cPath))
 
@@ -92,7 +100,7 @@ func StreamHash(path string) (string, error) {
 	errbuf := make([]C.char, errBufLen)
 
 	rc := C.mc_stream_hash(cPath,
-		&out[0], C.size_t(len(out)),
+		&out[0], C.size_t(len(out)), C.int64_t(maxBytes),
 		&errbuf[0], C.size_t(len(errbuf)))
 	if rc < 0 {
 		return "", avError("hash "+path, rc, &errbuf[0])

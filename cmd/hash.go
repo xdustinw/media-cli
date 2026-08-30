@@ -15,32 +15,36 @@ var (
 	flagAssumeYes     bool
 	flagHashForce     bool
 	flagHashRecursive bool
+	flagHashMethod    string
 )
 
 var hashCmd = &cobra.Command{
 	Use:   "hash [file or folder]",
-	Short: "Compute the metadata-independent MD5 of media files and tag them",
-	Long: `hash calculates a metadata-independent MD5 for each media file:
-
-  video (.mp4 .mkv .mov .m4v .webm .avi)  - over the encoded video+audio
-                                            elementary streams; container
-                                            metadata (ratings, tags) is ignored
-  images (.jpg .jpeg .png .gif .webp)      - over the decoded pixel data; EXIF,
-                                            XMP, ICC and text chunks are ignored
-
-Two files that differ only in metadata produce the same hash.
-
-Given a directory, only that directory's own files are processed; pass
--r/--recursive to descend into subdirectories. As each file is processed a
-preview line is printed; then you confirm writing the tag 'mc.hash=<hash>' and
-renaming each file to
+	Short: "Fingerprint media files by content and rename them",
+	Long: `hash fingerprints each media file and renames it to
 
     <name>.<first 6 of hash>.<ext>
 
-The target defaults to the current directory. By default a file that already
-carries a valid 'mc.hash' tag is trusted and not re-hashed (fast on large,
-already-processed folders). Pass -f/--force to re-compute every hash and compare
-it with the stored tag. Pass -y to skip the confirmation.`,
+(replacing any short hash already in the name). The -m/--method flag selects the
+fingerprint:
+
+  ffmpeg-10m  (default) md5 of the first ~10 MB of the encoded video+audio
+              stream — fast on large files; rename only
+  ffmpeg      md5 of the whole video+audio stream (for video) or the decoded
+              pixels (for images); metadata is ignored, so two files that
+              differ only in metadata match. This method also writes the value
+              into the file as the 'mc.hash' tag
+  md5 / sha   md5 / sha-256 of the raw file bytes (metadata included); rename only
+  md5-10m /
+  sha-10m     md5 / sha-256 of the first 10 MB of raw file bytes; rename only
+
+Only the 'ffmpeg' method reads or writes file metadata; the others just rename.
+
+Given a directory, only that directory's own files are processed; pass
+-r/--recursive to descend into subdirectories. The target defaults to the
+current directory. For the 'ffmpeg' method a file that already carries a valid
+'mc.hash' tag is trusted and not re-hashed; pass -f/--force to re-compute and
+compare. Pass -y to skip the confirmation.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("yes") {
@@ -48,9 +52,15 @@ it with the stored tag. Pass -y to skip the confirmation.`,
 		}
 
 		in := bufio.NewReader(cmd.InOrStdin())
+		method, err := hashcmd.ParseMethod(flagHashMethod)
+		if err != nil {
+			return err
+		}
+
 		opts := hashcmd.Options{
 			Target:      argOr(args, 0, "."),
 			Extensions:  vip.GetStringSlice(config.KeyMediaExts),
+			Method:      method,
 			MetadataKey: vip.GetString(config.KeyHashMetaKey),
 			NameLength:  vip.GetInt(config.KeyHashNameLen),
 			AssumeYes:   vip.GetBool(config.KeyAssumeYes),
@@ -76,6 +86,8 @@ func init() {
 	hashCmd.Flags().BoolVarP(&flagAssumeYes, "yes", "y", false, "skip confirmation and apply changes")
 	hashCmd.Flags().BoolVarP(&flagHashForce, "force", "f", false, "re-hash files that already have an mc.hash tag")
 	hashCmd.Flags().BoolVarP(&flagHashRecursive, "recursive", "r", false, "descend into subdirectories")
+	hashCmd.Flags().StringVarP(&flagHashMethod, "method", "m", "",
+		"hash method: ffmpeg, ffmpeg-10m (default), md5, sha, md5-10m, sha-10m")
 	_ = vip.BindPFlag(config.KeyAssumeYes, hashCmd.Flags().Lookup("yes"))
 	rootCmd.AddCommand(hashCmd)
 }

@@ -32,7 +32,7 @@ static int is_av_stream(enum AVMediaType t) {
 }
 
 int mc_stream_hash(const char *filename,
-                   char *out, size_t out_size,
+                   char *out, size_t out_size, int64_t max_bytes,
                    char *errbuf, size_t errbuf_size) {
     AVFormatContext *ic = NULL;
     AVFormatContext *oc = NULL;
@@ -145,12 +145,14 @@ int mc_stream_hash(const char *filename,
     // the interleaver would buffer and re-copy every packet to sort by DTS,
     // which for a correctly interleaved file (the norm) leaves the byte stream
     // the hash sees unchanged but doubles memory traffic on large files.
+    int64_t copied = 0;
     while ((ret = av_read_frame(ic, pkt)) >= 0) {
         int oi = smap[pkt->stream_index];
         if (oi < 0) {
             av_packet_unref(pkt);
             continue;
         }
+        int pkt_size = pkt->size;
         pkt->stream_index = oi;
         pkt->pos = -1;
         pkt->pts = AV_NOPTS_VALUE;
@@ -159,6 +161,10 @@ int mc_stream_hash(const char *filename,
         av_packet_unref(pkt);
         if (ret < 0) {
             goto done;
+        }
+        copied += pkt_size;
+        if (max_bytes > 0 && copied >= max_bytes) {
+            break;
         }
     }
     if (ret == AVERROR_EOF) {

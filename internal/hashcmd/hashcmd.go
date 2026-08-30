@@ -1,11 +1,11 @@
-// Package hashcmd implements the business logic behind `mc hash`: compute a
-// metadata-independent MD5 for each media file, then (on confirmation) persist
-// it as a freeform tag and rename the file.
+// Package hashcmd implements the business logic behind `mc hash`: fingerprint
+// each media file and rename it to <name>.<first 6 of hash>.<ext>.
 //
-// Video/audio files are hashed over their encoded video+audio elementary
-// streams (container metadata excluded). Still images are hashed over their
-// decoded pixels (EXIF/XMP/ICC/text excluded). Either way, editing metadata
-// does not change the hash.
+// The Method (see method.go) selects the fingerprint. The default "ffmpeg-10m"
+// hashes a bounded prefix of the video+audio streams and only renames. The full
+// "ffmpeg" method hashes the whole stream (metadata-independent) and also
+// stores the value as the mc.hash tag inside the file; the md5/sha methods hash
+// raw file bytes. Only "ffmpeg" reads or writes metadata.
 //
 // The preview of each file's hash and planned rename is printed as that file is
 // processed (rather than as one batch afterwards) so progress is visible on
@@ -31,10 +31,11 @@ import (
 type Options struct {
 	Target      string // file or directory (required)
 	Extensions  []string
+	Method      Method // "" => DefaultMethod (ffmpeg-10m)
 	MetadataKey string // freeform tag key, e.g. "mc.hash"
 	NameLength  int    // hash prefix length used in the renamed filename
 	AssumeYes   bool   // skip the confirmation prompt
-	Force       bool   // re-hash files that already carry the tag (and compare)
+	Force       bool   // re-hash files that already carry the tag (ffmpeg method only)
 	Recursive   bool   // descend into subdirectories
 
 	Stdout  io.Writer
@@ -55,12 +56,12 @@ type item struct {
 	path        string // current absolute/clean path
 	rel         string // display path relative to the target
 	kind        media.Kind
-	tag         tagger
+	tag         tagger // nil for rename-only methods
 	hash        string
 	prefix      string
 	newPath     string
-	existingTag string // current mc.hash value in the file, "" if none
-	hashChanged bool   // a mc.hash tag exists but no longer matches the content
+	existingTag string // ffmpeg: current mc.hash value; rename-only: the .<hex> slot already in the name
+	hashChanged bool   // the existing tag / name slot no longer matches the content
 	trusted     bool   // hash taken from the existing tag, not recomputed
 	act         action
 }
@@ -78,16 +79,25 @@ func Run(ctx context.Context, o Options) error {
 	if o.MetadataKey == "" {
 		o.MetadataKey = "mc.hash"
 	}
+	method, err := ParseMethod(string(o.Method))
+	if err != nil {
+		return err
+	}
+	o.Method = method
 
 	files, err := media.Discover(ctx, o.Target, o.Extensions, o.Recursive)
 	if err != nil {
 		return err
 	}
 	base := media.DisplayBase(o.Target)
-	log.Info("scanning", "target", o.Target, "files", len(files), "recursive", o.Recursive)
+	log.Info("scanning", "target", o.Target, "files", len(files), "recursive", o.Recursive, "method", string(method))
 
 	// Preview each file the moment it is hashed, so progress is visible.
-	fmt.Fprintf(o.Stdout, "Preview (%s):\n", o.MetadataKey)
+	if method.WritesTag() {
+		fmt.Fprintf(o.Stdout, "Preview (%s via %s):\n", o.MetadataKey, method)
+	} else {
+		fmt.Fprintf(o.Stdout, "Preview (%s, rename only):\n", method)
+	}
 
 	start := time.Now()
 	var bytesProcessed int64
@@ -98,25 +108,34 @@ func Run(ctx context.Context, o Options) error {
 			return err
 		}
 		kind := media.KindOf(f)
-		tg, err := taggerFor(kind)
-		if err != nil {
+
+		var tg tagger
+		if method.WritesTag() {
+			t, terr := taggerFor(kind)
+			if terr != nil {
+				scanErrs++
+				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), terr)
+				continue
+			}
+			tg = t
+		} else if method.usesFFmpeg() && kind == media.KindUnknown {
 			scanErrs++
-			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), err)
+			fmt.Fprintf(o.Stderr, "  ! %s: unsupported file type for method %s\n", media.RelTo(base, f), method)
 			continue
 		}
 
-		// Fast path: trust an existing, well-formed mc.hash tag and skip the
-		// (expensive) hashing entirely, unless --force asks to re-verify.
+		// Fast path (ffmpeg method only): trust an existing, well-formed mc.hash
+		// tag and skip the hashing entirely, unless --force asks to re-verify.
 		var h string
 		var trusted bool
-		if !o.Force {
+		if method.WritesTag() && !o.Force {
 			if v, terr := tg.ReadTag(f, o.MetadataKey); terr == nil && looksLikeHash(v) {
 				h, trusted = v, true
 			}
 		}
 		if !trusted {
-			log.Debug("hashing", "file", f, "kind", kind.String())
-			hh, herr := tg.Hash(f)
+			log.Debug("hashing", "file", f, "kind", kind.String(), "method", string(method))
+			hh, herr := method.digest(f, kind)
 			if herr != nil {
 				scanErrs++
 				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), herr)
@@ -142,13 +161,17 @@ func Run(ctx context.Context, o Options) error {
 		} else {
 			it.newPath = media.HashedName(f, it.prefix)
 		}
-		classify(o.MetadataKey, &it)
+		if method.WritesTag() {
+			classify(o.MetadataKey, &it)
+		} else {
+			classifyRename(o.NameLength, &it)
+		}
 		items = append(items, it)
 		if st, serr := os.Stat(f); serr == nil {
 			bytesProcessed += st.Size()
 		}
 
-		fmt.Fprintln(o.Stdout, previewLine(base, o.MetadataKey, it))
+		fmt.Fprintln(o.Stdout, previewLine(base, o.MetadataKey, method, it))
 	}
 
 	elapsed := time.Since(start)
@@ -174,10 +197,14 @@ func Run(ctx context.Context, o Options) error {
 
 	// Confirmation, unless -y.
 	if !o.AssumeYes {
+		prompt := fmt.Sprintf("Rename %d file(s) to <name>.<hash>.<ext>? [y/N] ", len(pending))
+		if method.WritesTag() {
+			prompt = fmt.Sprintf("Write '%s' metadata and rename %d file(s)? [y/N] ", o.MetadataKey, len(pending))
+		}
 		ok := false
 		if o.Confirm != nil {
 			var cErr error
-			ok, cErr = o.Confirm(fmt.Sprintf("Write '%s' metadata and rename %d file(s)? [y/N] ", o.MetadataKey, len(pending)))
+			ok, cErr = o.Confirm(prompt)
 			if cErr != nil {
 				return cErr
 			}
@@ -196,12 +223,12 @@ func Run(ctx context.Context, o Options) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := apply(o.MetadataKey, it); err != nil {
+		if err := apply(o.MetadataKey, method, it); err != nil {
 			applyErrs++
 			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", it.rel, err)
 			continue
 		}
-		log.Info("tagged", "file", it.newPath, "hash", it.hash)
+		log.Info("hashed", "file", it.newPath, "hash", it.hash, "method", string(method))
 		fmt.Fprintf(o.Stdout, "  ✓ %s  ->  %s\n", it.rel, media.RelTo(base, it.newPath))
 	}
 
@@ -236,6 +263,19 @@ func classify(key string, it *item) {
 	}
 }
 
+// classifyRename is classify for the rename-only methods: there is no tag, so
+// the only question is whether the name already carries the right short hash.
+// it.existingTag holds the .<hex> slot currently in the name (if any).
+func classifyRename(n int, it *item) {
+	it.existingTag = media.ShortHashInName(it.path, n)
+	if media.AlreadyTagged(it.path, it.prefix) {
+		it.act = actionSkip
+		return
+	}
+	it.hashChanged = it.existingTag != "" && it.existingTag != it.prefix
+	it.act = actionTag // "rename"
+}
+
 func filterPending(items []item) []item {
 	out := make([]item, 0, len(items))
 	for _, it := range items {
@@ -249,33 +289,39 @@ func filterPending(items []item) []item {
 // previewLine is the one line printed for a file the moment it is processed,
 // e.g. "  + video/a.mp4  <hash>  ->  video/a.8f9b6e.mp4". Leading glyph:
 //
-//	=  already tagged and named — nothing to do
-//	»  tag already correct, only the filename is stale (plain rename)
-//	~  mc.hash present but stale — rewritten
-//	+  no mc.hash yet — write it (and rename)
-func previewLine(base, key string, it item) string {
-	renameOnly := it.act != actionSkip && it.existingTag == it.hash
+//	=  already named for this content — nothing to do
+//	»  ffmpeg: tag already correct, only the name is stale; rename-only: a
+//	   different short hash is already in the name and is replaced
+//	~  mc.hash present but stale — rewritten (ffmpeg method only)
+//	+  no short hash in the name yet — add it
+func previewLine(base, key string, m Method, it item) string {
+	tagRenameOnly := m.WritesTag() && it.act != actionSkip && it.existingTag == it.hash
 	glyph := "+"
 	switch {
 	case it.act == actionSkip:
 		glyph = "="
-	case renameOnly:
+	case tagRenameOnly:
 		glyph = "»"
 	case it.act == actionRetag:
 		glyph = "~"
+	case !m.WritesTag() && it.hashChanged:
+		glyph = "»"
 	}
 
 	line := fmt.Sprintf("  %s %s  %s", glyph, it.rel, it.hash)
 	switch {
 	case it.act == actionSkip:
-		// already tagged and named — nothing more to say
+		// already named for this content — nothing more to say
 	case it.newPath != it.path:
 		line += "  ->  " + media.RelTo(base, it.newPath)
 	default:
 		line += "  (tag only)"
 	}
-	if it.hashChanged {
+	switch {
+	case m.WritesTag() && it.hashChanged:
 		line += fmt.Sprintf("   (stale %s %s replaced)", key, short(it.existingTag))
+	case !m.WritesTag() && it.hashChanged:
+		line += fmt.Sprintf("   (replaces .%s)", it.existingTag)
 	}
 	return line
 }
@@ -301,12 +347,12 @@ func looksLikeHash(s string) bool {
 	return true
 }
 
-// apply writes the tag into a sibling temp file, then moves it into place and
-// removes the original when the name changes.
-func apply(key string, it item) error {
-	// Fast path: the file already carries the exact tag we would write, so only
-	// the name is out of date — a plain rename, no remux / metadata rewrite.
-	if it.existingTag == it.hash && it.newPath != it.path {
+// apply performs the planned change for one item. Rename-only methods just move
+// the file; the ffmpeg method writes the tag into a sibling temp file first.
+func apply(key string, m Method, it item) error {
+	// Rename-only methods (and the ffmpeg fast path where the tag is already
+	// correct and only the name is stale): a plain rename, no metadata write.
+	if !m.WritesTag() || (it.existingTag == it.hash && it.newPath != it.path) {
 		return media.SwapInPlace(it.path, it.newPath, false)
 	}
 
@@ -340,9 +386,8 @@ func summaryErr(scanErrs int) error {
 	return nil
 }
 
-// tagger abstracts hashing and freeform-tag I/O for one media kind.
+// tagger abstracts freeform-tag I/O for one media kind (ffmpeg method only).
 type tagger interface {
-	Hash(path string) (string, error)
 	ReadTag(path, key string) (string, error) // returns errTagAbsent when unset
 	WriteTag(src, dst, key, value string) error
 }
@@ -362,8 +407,6 @@ func taggerFor(k media.Kind) (tagger, error) {
 
 type videoTagger struct{}
 
-func (videoTagger) Hash(p string) (string, error) { return ffmpeg.StreamHash(p) }
-
 func (videoTagger) ReadTag(p, key string) (string, error) {
 	v, err := ffmpeg.ReadTag(p, key)
 	if errors.Is(err, ffmpeg.ErrTagAbsent) {
@@ -377,8 +420,6 @@ func (videoTagger) WriteTag(src, dst, key, value string) error {
 }
 
 type imageTagger struct{}
-
-func (imageTagger) Hash(p string) (string, error) { return ffmpeg.ImageHash(p) }
 
 func (imageTagger) ReadTag(p, key string) (string, error) {
 	v, err := imgmeta.Read(p, key)

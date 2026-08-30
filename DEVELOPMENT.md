@@ -24,6 +24,13 @@
     already in order.
 
   ~16 % faster on a 97 MB h264/aac mp4 (`go test ./internal/ffmpeg -bench StreamHash`).
+
+  `StreamHashLimit(path, maxBytes)` stops feeding packets once `maxBytes` of
+  payload has been copied (`mc_stream_hash`'s `max_bytes` arg) — the `hash -m
+  ffmpeg-10m` default and `*-10m` methods fingerprint only a bounded prefix,
+  bounding work on very large files. `mc hash`'s non-`ffmpeg` methods
+  (`internal/hashcmd/method.go`) skip metadata entirely: they hash raw file
+  bytes (md5/sha) or a bounded stream prefix and only rename the file.
 - **Image hashing** decodes to pixels and MD5s the raw plane data (plus format
   and dimensions), so EXIF / XMP / ICC / text chunks never affect it.
 - **Tag writes** never touch pixel or stream data. MP4/MKV container metadata

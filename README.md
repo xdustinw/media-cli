@@ -63,7 +63,7 @@ the old `mc.exe` as `mc-<version>.exe`).
 
 | Command | Description |
 | --- | --- |
-| [`mc hash`](#mc-hash) | Hash media by content, then tag and rename each file |
+| [`mc hash`](#mc-hash) | Fingerprint media by content and rename each file (optionally tag it) |
 | [`mc list`](#mc-list) | List a folder's media with size and metadata, filter & sort |
 | [`mc set`](#mc-set) | Write chosen metadata onto matching files in a folder |
 | [`mc info`](#mc-info) | Dump everything known about one file |
@@ -75,49 +75,52 @@ Global flags: `-v/--verbose`, `--debug`, `--config <path>`.
 ### `mc hash`
 
 ```
-mc hash [file or folder] [-y] [-f] [-r]   # target defaults to the current directory
+mc hash [file or folder] [-m <method>] [-y] [-f] [-r]   # target defaults to the current directory
 ```
 
-Hash media by content, then write the hash into the file and rename it. Given a
-folder, only its own files are processed; pass `-r` / `--recursive` to descend
-into subfolders.
+Fingerprint media by content and rename each file to
+`<name>.<first 6 of hash>.<ext>` (replacing a short hash already in the name).
+Given a folder, only its own files are processed; pass `-r` / `--recursive` to
+descend into subfolders.
 
 ```bash
-mc hash                       # hash the current directory
-mc hash movie.mp4             # hash one file, confirm changes
+mc hash                       # current directory, default method (ffmpeg-10m)
+mc hash movie.mp4             # one file, confirm changes
 mc hash -r ~/Videos           # include subfolders
-mc hash ~/Photos -y          # no confirmation prompt
-mc hash ~/Photos -f          # re-hash even files that already have mc.hash
+mc hash ~/Photos -y           # no confirmation prompt
+mc hash ~/Videos -m ffmpeg    # full metadata-independent hash + write mc.hash
+mc hash ~/Videos -m md5-10m   # fastest: md5 of the first 10 MB of file bytes
 ```
 
-| | |
-| --- | --- |
-| **Video** `.mp4 .mkv .mov .m4v .webm .avi` | MD5 of the encoded video+audio streams (stream copy, no decoding) — container metadata ignored |
-| **Images** `.jpg .jpeg .png .gif .webp` (+ `.jpe .jfif .apng`) | MD5 of the decoded pixels — EXIF / XMP / ICC / comments ignored |
+**`-m` / `--method`** — how the fingerprint is computed:
 
-As each file is processed it prints a preview line — `+` write & rename, `»`
-rename only (tag already correct), `~` re-tag stale, `=` already current — so
-progress is visible on large folders:
+| method | hashes | speed | writes `mc.hash`? |
+| --- | --- | --- | --- |
+| `ffmpeg-10m` *(default)* | md5 of the first ~10 MB of the video+audio stream | fast | no |
+| `ffmpeg` | md5 of the whole video+audio stream (video) or decoded pixels (images); metadata ignored | slow | **yes** |
+| `md5` / `sha` | md5 / sha-256 of the raw file bytes (metadata included) | medium | no |
+| `md5-10m` / `sha-10m` | md5 / sha-256 of the first 10 MB of file bytes | fastest | no |
+
+Only `ffmpeg` reads or writes file metadata; every other method just renames.
+`ffmpeg` and `ffmpeg-10m` treat two files that differ only in metadata as
+identical; `md5` / `sha` do not (they see the raw bytes).
+
+As each file is processed it prints a preview line — `+` add hash to name, `»`
+replace a different hash already in the name (or, for `ffmpeg`, rename only), `~`
+re-tag stale, `=` already current:
 
 ```
-Preview (mc.hash):
-  + trip/IMG_1.jpg  6cb96fb6…98e5  ->  trip/IMG_1.6cb96f.jpg
-  = trip/IMG_2.fbc6ec.jpg  fbc6ec44…409b
+Preview (ffmpeg-10m, rename only):
+  + trip/IMG_1.jpg  6cb96fb66986b44f505831c54f69598e  ->  trip/IMG_1.6cb96f.jpg
+  = trip/IMG_2.fbc6ec.jpg  fbc6ec44...
 ```
 
-Then, after `[y/N]` (or with `-y`), for each pending file it:
-
-1. writes the tag `mc.hash=<hash>` into the file — pixels and streams are left
-   byte-for-byte untouched;
-2. renames it to `<name>.<first 6 of hash>.<ext>` (replacing an existing
-   `.<6-hex>` slot rather than appending a second one).
-
-**By default a file that already carries a valid `mc.hash` tag is trusted and
-not re-hashed** — the stored value is used directly, so re-running on a large,
-already-processed folder is near-instant (and files that only need renaming are
-moved, not remuxed). Pass `-f` / `--force` to re-compute every hash and compare
-it with the stored tag; a mismatch is flagged (`~`, "stale mc.hash … replaced")
-and the tag rewritten.
+For the `ffmpeg` method, after `[y/N]` (or `-y`) each pending file gets the tag
+`mc.hash=<hash>` written into it (pixels and streams left byte-for-byte
+untouched) and is renamed. **A file that already carries a valid `mc.hash` tag
+is trusted and not re-hashed**; pass `-f` / `--force` to re-compute and compare
+(a mismatch is flagged `~` "stale mc.hash … replaced" and rewritten). `-f` has
+no effect on the rename-only methods, which always re-read the file.
 
 ### `mc list`
 

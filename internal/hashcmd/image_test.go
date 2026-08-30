@@ -66,6 +66,7 @@ func TestImageHashStableThroughTagging(t *testing.T) {
 			opts := Options{
 				Target:      root,
 				Extensions:  []string{ext},
+				Method:      MethodFFmpeg,
 				MetadataKey: "mc.hash",
 				NameLength:  6,
 				AssumeYes:   true,
@@ -113,8 +114,8 @@ func runHash(t *testing.T, root string, force bool) (stdout, stderr string) {
 	t.Helper()
 	var o, e bytes.Buffer
 	err := Run(context.Background(), Options{
-		Target: root, Extensions: []string{".png"}, MetadataKey: "mc.hash",
-		NameLength: 6, AssumeYes: true, Force: force,
+		Target: root, Extensions: []string{".png"}, Method: MethodFFmpeg,
+		MetadataKey: "mc.hash", NameLength: 6, AssumeYes: true, Force: force,
 		Stdout: &o, Stderr: &e, Logger: quietLogger(),
 	})
 	if err != nil {

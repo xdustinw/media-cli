@@ -17,12 +17,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in; `scripts/build-ffmpeg.sh` builds any target (host or cross), fetching the
   pinned FFmpeg source when `../ref/ffmpeg` is absent. Audio/video use stream
   copy; a curated set of still-image decoders is enabled for image hashing.
-- **`mc hash [file|folder] [-y] [-f] [-r]`**: computes a metadata-independent MD5
-  for each video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe
-  .jfif .png .apng .gif .webp`) file. Given a folder, only its own files are
-  processed unless `-r` / `--recursive` is passed. The target defaults to the
-  current directory.
-  - Video: hash of the encoded video+audio streams, ignoring container metadata
+- **`mc hash [file|folder] [-m <method>] [-y] [-f] [-r]`**: fingerprints each
+  video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe .jfif
+  .png .apng .gif .webp`) file and renames it to `<name>.<first 6 of hash>.<ext>`
+  (replacing a short hash already in the name). Given a folder, only its own
+  files are processed unless `-r` / `--recursive` is passed. The target defaults
+  to the current directory.
+  - `-m` / `--method` selects the fingerprint: `ffmpeg-10m` (default) md5s the
+    first ~10 MB of the video+audio stream; `ffmpeg` md5s the whole stream (or
+    decoded pixels for images) and is the only method that also writes the
+    `mc.hash` tag; `md5` / `sha` hash the raw file bytes; `md5-10m` / `sha-10m`
+    hash the first 10 MB of raw bytes. Only `ffmpeg` reads or writes metadata —
+    the rest just rename. The `*-10m` methods bound work on very large files
+    (new `ffmpeg.StreamHashLimit`; `mc_stream_hash` gained a `max_bytes` arg).
+  - Video (`ffmpeg` method): hash of the encoded video+audio streams, ignoring container metadata
     (equivalent to `ffmpeg -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`) —
     pure stream copy, never decoded. Parsers (`AVFMT_FLAG_NOPARSE`), the
     stream-info probe (when the header already types every stream) and the
@@ -33,18 +41,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     (`Invalid NAL unit size`, `missing picture in access unit`, …) is silenced
     by default — it does not affect the hash and the CLI reports real failures
     itself. `-v` / `--debug` brings the FFmpeg log back.
-  - Prints `<hash> - <path>`, shows a preview, then on confirmation (or `-y`)
-    writes the freeform tag `mc.hash=<hash>` and renames each file to
-    `<name>.<first 6 of hash>.<ext>`. If the name already ends with a
-    `.<6-hex>` slot, it is replaced rather than a second one appended.
-  - Tag writes never alter pixels or streams: video is remuxed with stream copy;
+  - Shows a per-file preview, then on confirmation (or `-y`) renames each file
+    (`ffmpeg` method also writes the freeform tag `mc.hash=<hash>` first). If the
+    name already ends with a `.<6-hex>` slot, it is replaced rather than a
+    second one appended.
+  - Tag writes (`ffmpeg` method) never alter pixels or streams: video is remuxed with stream copy;
     images get a native text record (PNG `tEXt`, JPEG `COM`, GIF comment, WebP
     `mcTG` chunk) added via `internal/imgmeta`.
-  - By default a file that already has a valid `mc.hash` tag is trusted and not
-    re-hashed — the stored value is used directly, making re-runs on large,
-    already-processed folders near-instant (and rename-only files are moved, not
-    remuxed). `-f` / `--force` re-computes every hash and compares it with the
-    stored tag, flagging any mismatch.
+  - For the `ffmpeg` method a file that already has a valid `mc.hash` tag is
+    trusted and not re-hashed — the stored value is used directly, making re-runs
+    on large, already-processed folders near-instant. `-f` / `--force`
+    re-computes and compares, flagging any mismatch; it has no effect on the
+    rename-only methods, which always re-read the file.
   - The per-file preview (hash + planned name, `+`/`»`/`~`/`=` glyph) is printed
     as each file is processed, so progress shows on large folders.
 - **`mc list [folder] [flags]`**: folder listing (folder defaults to the current

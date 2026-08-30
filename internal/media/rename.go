@@ -30,6 +30,16 @@ func AlreadyTagged(path, prefix string) bool {
 	return strings.HasSuffix(stem, "."+prefix)
 }
 
+// ShortHashInName returns the trailing ".<hex>" hash slot embedded in path's
+// name (without the dot) when it is exactly n hex characters, else "". It is
+// how `mc hash` and `mc copy`/`mc move` recognise an already-hashed file from
+// its name alone, without reading any metadata.
+func ShortHashInName(path string, n int) string {
+	ext := filepath.Ext(path)
+	stem := strings.TrimSuffix(filepath.Base(path), ext)
+	return existingHashSuffix(stem, n)
+}
+
 // existingHashSuffix returns the trailing ".<hex>" run of stem (without the
 // dot) when it is exactly n hex characters, else "".
 func existingHashSuffix(stem string, n int) string {

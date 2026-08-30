@@ -58,6 +58,7 @@ func TestRunTagsRenamesAndIsIdempotent(t *testing.T) {
 	opts := Options{
 		Target:      root,
 		Extensions:  []string{".mp4", ".mkv"},
+		Method:      MethodFFmpeg,
 		MetadataKey: "mc.hash",
 		NameLength:  6,
 		AssumeYes:   true,
@@ -126,6 +127,45 @@ func TestRunTagsRenamesAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestMethodFFmpeg10MVideoRenameOnly: ffmpeg-10m renames the clip by a bounded
+// stream hash and writes no mc.hash tag.
+func TestMethodFFmpeg10MVideoRenameOnly(t *testing.T) {
+	a, _ := samples(t)
+	root := t.TempDir()
+	orig := filepath.Join(root, "movie.mp4")
+	cp(t, a, orig)
+	tagBefore, _ := ffmpeg.ReadTag(orig, "mc.hash") // samples may already carry one
+
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), Options{
+		Target: root, Extensions: []string{".mp4"}, Method: MethodFFmpeg10M,
+		NameLength: 6, AssumeYes: true,
+		Stdout: &out, Stderr: &errb, Logger: quietLogger(),
+	}); err != nil {
+		t.Fatalf("run: %v\n%s", err, errb.String())
+	}
+	if !strings.Contains(out.String(), "rename only") {
+		t.Fatalf("expected a rename-only preview header:\n%s", out.String())
+	}
+
+	got := onlyMatch(t, root, "movie.*.mp4")
+	if tagAfter, _ := ffmpeg.ReadTag(got, "mc.hash"); tagAfter != tagBefore {
+		t.Fatalf("ffmpeg-10m must not touch mc.hash (%q -> %q)", tagBefore, tagAfter)
+	}
+	// The bounded hash differs from the full-stream hash on a >10 MiB sample.
+	full, err := ffmpeg.StreamHash(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capped, err := ffmpeg.StreamHashLimit(got, 10<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full == capped {
+		t.Fatal("expected the 10 MiB-bounded stream hash to differ from the full hash")
+	}
+}
+
 func TestRunAbortsWithoutConfirmation(t *testing.T) {
 	a, _ := samples(t)
 	root := t.TempDir()
@@ -136,6 +176,7 @@ func TestRunAbortsWithoutConfirmation(t *testing.T) {
 	opts := Options{
 		Target:      root,
 		Extensions:  []string{".mp4"},
+		Method:      MethodFFmpeg,
 		MetadataKey: "mc.hash",
 		NameLength:  6,
 		Stdout:      &out,
