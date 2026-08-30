@@ -7,8 +7,11 @@
 `libavcodec` / `libavutil` directly, statically linked from
 `third_party/ffmpeg/<goos>_<goarch>/`.
 
-- **Video hashing** feeds demuxed packets through FFmpeg's real `hash` muxer, so
-  `mc hash` on a video matches `ffmpeg -i f -map 0:v? -map 0:a? -f hash -hash md5 -`.
+- **Video hashing** (`mc_stream_hash`) is pure stream copy — packets are demuxed
+  and fed straight to FFmpeg's real `hash` muxer via `av_interleaved_write_frame`,
+  never decoded — so `mc hash` on a video matches
+  `ffmpeg -i f -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`. The cost is
+  inherently one MD5 pass over the streams' bytes; there is no decode to remove.
 - **Image hashing** decodes to pixels and MD5s the raw plane data (plus format
   and dimensions), so EXIF / XMP / ICC / text chunks never affect it.
 - **Tag writes** never touch pixel or stream data: video is remuxed with stream
@@ -16,6 +19,11 @@
   record inserted by `internal/imgmeta` (PNG `tEXt`, JPEG `COM`, GIF comment,
   WebP private `mcTG` RIFF chunk). That reader/writer is a matched pair — values
   are not guaranteed to round-trip through other tools.
+- **FFmpeg logging** is set to `AV_LOG_FATAL` in `internal/ffmpeg`'s `init()`.
+  libav*'s `AV_LOG_ERROR` messages about individual malformed packets are noise
+  for a hashing tool and do not change the result; genuine open/read failures
+  come back as return codes the CLI surfaces itself. `mc <cmd> -v` / `--debug`
+  raises the level via `ffmpeg.SetVerbose`.
 
 ## Build from source
 
