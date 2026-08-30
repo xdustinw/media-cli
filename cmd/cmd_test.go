@@ -36,6 +36,24 @@ func TestHashHelp(t *testing.T) {
 	}
 }
 
+func TestListInfoHelp(t *testing.T) {
+	for _, tc := range []struct{ cmd, want string }{
+		{"list", "--select"},
+		{"info", "EXIF"},
+	} {
+		var out bytes.Buffer
+		rootCmd.SetOut(&out)
+		rootCmd.SetArgs([]string{tc.cmd, "--help"})
+		if err := rootCmd.ExecuteContext(context.Background()); err != nil {
+			t.Fatalf("%s --help: %v", tc.cmd, err)
+		}
+		if !strings.Contains(out.String(), tc.want) {
+			t.Fatalf("%s help missing %q: %s", tc.cmd, tc.want, out.String())
+		}
+	}
+	rootCmd.SetArgs(nil)
+}
+
 func TestUpdateHelp(t *testing.T) {
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)

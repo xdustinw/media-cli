@@ -131,10 +131,11 @@ go test ./...
 go vet ./...
 ```
 
-- `internal/imgmeta`, `internal/toon`, `internal/media`, `internal/selfupdate`
-  are pure-Go unit tests.
-- `internal/ffmpeg` and `internal/hashcmd` tests generate PNG/JPEG/GIF fixtures
-  in-process; video tests use samples under `tmp/` and skip when absent.
+- `internal/imgmeta`, `internal/toon`, `internal/media`, `internal/selfupdate`,
+  `internal/query`, `internal/render`, `internal/mediainfo` are pure-Go units.
+- `internal/ffmpeg`, `internal/hashcmd`, `internal/listcmd`, `internal/infocmd`
+  tests generate PNG/JPEG/GIF fixtures in-process; video tests use samples under
+  `tmp/` and skip when absent.
 - CLI tests capture output with `bytes.Buffer` (see `cmd/*_test.go`).
 
 ## Licensing
@@ -156,12 +157,16 @@ no GPL/nonfree parts. Compliance is handled by:
 | Path | Purpose |
 | --- | --- |
 | `cmd/` | Cobra commands — thin: parsing, wiring, error presentation |
-| `internal/ffmpeg/` | cgo bridge: stream & pixel hashing, tag remux |
+| `internal/ffmpeg/` | cgo bridge: stream & pixel hashing, tag remux, `Inspect` probe |
 | `internal/imgmeta/` | pixel-preserving image metadata read/write (PNG/JPEG/GIF/WebP) |
 | `internal/hashcmd/` | `mc hash` workflow |
+| `internal/listcmd/`, `internal/infocmd/` | `mc list` / `mc info` workflows |
+| `internal/mediainfo/` | filesystem + probe → one record; rating/authors/tags derivation |
+| `internal/query/` | `--select` / `--sort-by` parser and evaluator |
+| `internal/render/` | TOON / JSON / CSV output, order-preserving |
 | `internal/selfupdate/` | `mc update`: release lookup + in-place binary replacement |
 | `internal/media/` | file discovery, video/image classification, safe rename |
-| `internal/toon/` | TOON preview encoder |
+| `internal/toon/` | TOON preview encoder (hash/update previews) |
 | `internal/config/`, `internal/logging/` | Viper / slog setup |
 | `scripts/build-ffmpeg.sh` | vendored FFmpeg builder |
 | `third_party/ffmpeg/<goos>_<goarch>/` | static FFmpeg libs + headers (only `linux_amd64` committed) |
