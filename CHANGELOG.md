@@ -21,8 +21,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe .jfif
   .png .apng .gif .webp`) file, recursively for folders.
   - Video: hash of the encoded video+audio streams, ignoring container metadata
-    (equivalent to `ffmpeg -map 0:v? -map 0:a? -f hash -hash md5 -`).
+    (equivalent to `ffmpeg -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`) —
+    pure stream copy, never decoded.
   - Image: hash of the decoded pixels, ignoring EXIF / XMP / ICC / text chunks.
+  - FFmpeg's own `AV_LOG_ERROR` chatter about individual malformed packets
+    (`Invalid NAL unit size`, `missing picture in access unit`, …) is silenced
+    by default — it does not affect the hash and the CLI reports real failures
+    itself. `-v` / `--debug` brings the FFmpeg log back.
   - Prints `<hash> - <path>`, shows a TOON preview, then on confirmation (or
     `-y`) writes the freeform tag `mc.hash=<hash>` and renames each file to
     `<name>.<first 6 of hash>.<ext>`.

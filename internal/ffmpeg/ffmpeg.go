@@ -54,12 +54,16 @@ func BuildInfo() string {
 }
 
 func init() {
-	// Keep libav* quiet by default; the CLI reports its own errors.
-	C.av_log_set_level(C.AV_LOG_ERROR)
+	// Keep libav* silent by default. The CLI reports genuine failures through
+	// its own error path; FFmpeg's AV_LOG_ERROR chatter about individual
+	// malformed packets (e.g. "Invalid NAL unit size", "missing picture in
+	// access unit") is noise for a hashing tool and does not affect the result.
+	// `mc <cmd> -v` / `--debug` brings it back.
+	C.av_log_set_level(C.AV_LOG_FATAL)
 }
 
-// SetVerbose raises libav* logging to info/verbose (debug=true) level. Call it
-// from the CLI surface when --verbose / --debug is set.
+// SetVerbose raises libav* logging when --verbose / --debug is set: info-level
+// for --verbose, verbose-level for --debug.
 func SetVerbose(debug bool) {
 	if debug {
 		C.av_log_set_level(C.AV_LOG_VERBOSE)

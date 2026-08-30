@@ -87,7 +87,7 @@ mc hash ~/Photos -f           # re-hash even files that already have mc.hash
 
 | | |
 | --- | --- |
-| **Video** `.mp4 .mkv .mov .m4v .webm .avi` | MD5 of the encoded video+audio streams — container metadata ignored |
+| **Video** `.mp4 .mkv .mov .m4v .webm .avi` | MD5 of the encoded video+audio streams (stream copy, no decoding) — container metadata ignored |
 | **Images** `.jpg .jpeg .png .gif .webp` (+ `.jpe .jfif .apng`) | MD5 of the decoded pixels — EXIF / XMP / ICC / comments ignored |
 
 As each file is processed it prints a preview line — `+` write & rename, `»`
