@@ -18,12 +18,13 @@ wget -O mc https://github.com/xdustinw/media-cli/releases/latest/download/mc-lin
 chmod +x ./mc && ./mc version
 ```
 
-**macOS** (Apple Silicon — Intel: swap `arm64` → `amd64`)
+**macOS** (Apple Silicon)
 ```bash
 wget -O mc https://github.com/xdustinw/media-cli/releases/latest/download/mc-darwin-arm64
 chmod +x ./mc && ./mc version
 # if Gatekeeper complains: xattr -d com.apple.quarantine ./mc
 ```
+Intel Macs: no pre-built binary — [build from source](#option-b--build-from-source).
 
 **Windows** (PowerShell)
 ```powershell
