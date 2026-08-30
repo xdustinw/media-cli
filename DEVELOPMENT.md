@@ -26,11 +26,16 @@
   ~16 % faster on a 97 MB h264/aac mp4 (`go test ./internal/ffmpeg -bench StreamHash`).
 - **Image hashing** decodes to pixels and MD5s the raw plane data (plus format
   and dimensions), so EXIF / XMP / ICC / text chunks never affect it.
-- **Tag writes** never touch pixel or stream data: video is remuxed with stream
-  copy (`-movflags use_metadata_tags` for MP4/MOV); images get a native text
-  record inserted by `internal/imgmeta` (PNG `tEXt`, JPEG `COM`, GIF comment,
-  WebP private `mcTG` RIFF chunk). That reader/writer is a matched pair — values
-  are not guaranteed to round-trip through other tools.
+- **Tag writes** never touch pixel or stream data. MP4/MKV container metadata
+  cannot be patched in place, so `ffmpeg.WriteTags` **remuxes the whole file**
+  with stream copy (`-movflags use_metadata_tags` for MP4/MOV) — a read + write
+  pass over every byte, comparable in cost to hashing it, and unavoidable for
+  video. It reuses the pre-computed hash (nothing is re-hashed after
+  confirmation) and applies the same parser/probe skips as `mc_stream_hash`.
+  Images are cheap: `internal/imgmeta` inserts a native text record (PNG `tEXt`,
+  JPEG `COM`, GIF comment, WebP private `mcTG` chunk) without re-encoding. That
+  reader/writer is a matched pair — values are not guaranteed to round-trip
+  through other tools.
 - **FFmpeg logging** is set to `AV_LOG_FATAL` in `internal/ffmpeg`'s `init()`.
   libav*'s `AV_LOG_ERROR` messages about individual malformed packets are noise
   for a hashing tool and do not change the result; genuine open/read failures

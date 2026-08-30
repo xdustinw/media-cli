@@ -422,9 +422,24 @@ int mc_write_tags(const char *infile, const char *outfile,
     if (ret < 0) {
         goto done;
     }
-    ret = avformat_find_stream_info(ic, NULL);
-    if (ret < 0) {
-        goto done;
+    // Stream copy remux: no need to parse frame contents. Skip the parsers,
+    // and skip the stream-info probe when the container header already types
+    // every stream (it just reads data we then copy through anyway).
+    ic->flags |= AVFMT_FLAG_NOPARSE;
+    int need_probe = ic->nb_streams == 0;
+    for (unsigned i = 0; i < ic->nb_streams && !need_probe; i++) {
+        enum AVMediaType t = ic->streams[i]->codecpar->codec_type;
+        if (t != AVMEDIA_TYPE_VIDEO && t != AVMEDIA_TYPE_AUDIO &&
+            t != AVMEDIA_TYPE_SUBTITLE && t != AVMEDIA_TYPE_DATA &&
+            t != AVMEDIA_TYPE_ATTACHMENT) {
+            need_probe = 1;
+        }
+    }
+    if (need_probe) {
+        ret = avformat_find_stream_info(ic, NULL);
+        if (ret < 0) {
+            goto done;
+        }
     }
 
     ret = avformat_alloc_output_context2(&oc, NULL, NULL, outfile);
