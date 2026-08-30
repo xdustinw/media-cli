@@ -28,7 +28,8 @@ toon/json nest the rows under their folders; csv is one flat table (absolute pat
   --select    keep only matching files, e.g.
               --select='name=sample* and rating>=4 and size>1g and modifiedAt>2026-08-01'
               fields: name, path, size, rating, modifiedAt, kind, format, authors,
-              tags, or any metadata key. ops: = != > < >= <=  ( = supports globs ).
+              tags, or any metadata key. ops: = != > < >= <=  ( = is a
+              case-insensitive * / ? wildcard match ).
               combine with 'and' / 'or'.
   --sort-by   comma separated keys with optional 'desc', e.g.
               --sort-by='rating desc, size desc, name'

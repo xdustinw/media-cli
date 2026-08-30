@@ -147,7 +147,8 @@ $ mc list tmp
 - `--meta` – extra metadata columns, comma separated.
 - `--select` – keep matching files. Fields: `name`, `path`, `size`,
   `modifiedAt`, `rating`, `kind`, `format`, `authors`, `tags`, or any metadata
-  key. Operators `= != > < >= <=` (`=` supports `*`/`?` globs); sizes take
+  key. Operators `= != > < >= <=`; `=` matches case-insensitively and supports
+  `*` / `?` wildcards (`name=*trip*`), the same on every OS. Sizes take
   `k`/`m`/`g`/`t` suffixes; dates are `YYYY-MM-DD`. Combine with `and` / `or`.
 - `--sort-by` – comma-separated keys, each optionally `desc` (default `name`);
   folders are always alphabetical.

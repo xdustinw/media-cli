@@ -65,6 +65,41 @@ func TestSelect(t *testing.T) {
 	must("missing!=x", true)
 }
 
+func TestGlobMatch(t *testing.T) {
+	cases := []struct {
+		pat, s string
+		want   bool
+	}{
+		{"*somestring*", "vid-somestring-1.mp4", true},
+		{"*somestring*", "SomeString.jpg", false}, // caller lowercases; globMatch is literal
+		{"3*adam*", "3-adam-trip.mp4", true},
+		{"3*adam*", "adam-3.mp4", false},
+		{"?oo.mp4", "foo.mp4", true},
+		{"?oo.mp4", "fooo.mp4", false},
+		{"*", "anything at all/with sep\\chars", true}, // '*' spans separators
+		{"a*b*c", "axxbxxc", true},
+		{"a*b*c", "axxbxx", false},
+		{"exact.mp4", "exact.mp4", true},
+		{"*.mp4", "a.mkv", false},
+	}
+	for _, c := range cases {
+		if got := globMatch(c.pat, c.s); got != c.want {
+			t.Errorf("globMatch(%q, %q) = %v, want %v", c.pat, c.s, got, c.want)
+		}
+	}
+}
+
+func TestSelectGlobCaseInsensitive(t *testing.T) {
+	r := rec{"name": String("Trip-SomeString-2026.MP4")}
+	s, err := ParseSelect("name=*somestring*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Match(r) {
+		t.Fatal("name=*somestring* should match Trip-SomeString-2026.MP4 (case-insensitive)")
+	}
+}
+
 func TestSort(t *testing.T) {
 	keys, err := ParseSort("rating desc, size desc, name")
 	if err != nil {

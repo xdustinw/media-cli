@@ -55,8 +55,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `--meta=title,make,...` adds metadata columns.
   - `--select='name=sample* and rating>=4 and size>1g and modifiedAt>2026-08-01'`
     filters — fields `name/path/size/modifiedAt/rating/kind/format/authors/tags`
-    or any metadata key, operators `= != > < >= <=` (globs on `=`), size
-    suffixes `k/m/g/t`, `and`/`or`.
+    or any metadata key, operators `= != > < >= <=` (`=` does a case-insensitive
+    `*`/`?` wildcard match, OS-independent), size suffixes `k/m/g/t`, `and`/`or`.
   - `--sort-by='rating desc, size desc, name'` — multi-key, optional `desc`.
 - **`mc set '<key=value,...>' <folder> [--select=<expr>] [-y]`**: writes chosen
   metadata onto the media files in a folder (recursively) that match `--select`.

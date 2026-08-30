@@ -3,7 +3,6 @@
 package query
 
 import (
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -122,9 +121,8 @@ func cmpStr(s, lit, op string) bool {
 	s, lit = strings.ToLower(s), strings.ToLower(lit)
 	switch op {
 	case "=":
-		if strings.ContainsAny(lit, "*?[") {
-			ok, err := filepath.Match(lit, s)
-			return err == nil && ok
+		if strings.ContainsAny(lit, "*?") {
+			return globMatch(lit, s)
 		}
 		return s == lit
 	case "!=":
@@ -139,6 +137,36 @@ func cmpStr(s, lit, op string) bool {
 		return s <= lit
 	}
 	return false
+}
+
+// globMatch reports whether s matches a shell-style pattern using '*' (any run
+// of runes, separators included) and '?' (any single rune). Unlike
+// filepath.Match it is separator-agnostic and behaves identically on every OS,
+// so `name=*foo*` works on Windows too.
+func globMatch(pattern, s string) bool {
+	p, t := []rune(pattern), []rune(s)
+	var pi, ti int
+	star, starT := -1, 0
+	for ti < len(t) {
+		switch {
+		case pi < len(p) && (p[pi] == '?' || p[pi] == t[ti]):
+			pi++
+			ti++
+		case pi < len(p) && p[pi] == '*':
+			star, starT = pi, ti
+			pi++
+		case star >= 0:
+			pi = star + 1
+			starT++
+			ti = starT
+		default:
+			return false
+		}
+	}
+	for pi < len(p) && p[pi] == '*' {
+		pi++
+	}
+	return pi == len(p)
 }
 
 // parseNumber accepts a plain number or one with a size suffix (k/m/g/t, 1024-based).
