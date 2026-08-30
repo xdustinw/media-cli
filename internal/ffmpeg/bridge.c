@@ -45,9 +45,32 @@ int mc_stream_hash(const char *filename,
     if (ret < 0) {
         goto done;
     }
-    ret = avformat_find_stream_info(ic, NULL);
-    if (ret < 0) {
-        goto done;
+    // Stream copy never inspects frame contents, so skip the bitstream
+    // parsers: they re-frame packets (splitting/merging without changing the
+    // concatenated bytes the hash sees) and cost CPU on every packet.
+    ic->flags |= AVFMT_FLAG_NOPARSE;
+
+    // Only probe when the container header did not already classify every
+    // stream (mp4/mkv/mov/webm/... carry codec type + id up front). Probing
+    // reads and buffers data we would otherwise stream straight through.
+    int need_probe = 0;
+    for (unsigned i = 0; i < ic->nb_streams; i++) {
+        enum AVMediaType t = ic->streams[i]->codecpar->codec_type;
+        if (t != AVMEDIA_TYPE_VIDEO && t != AVMEDIA_TYPE_AUDIO &&
+            t != AVMEDIA_TYPE_SUBTITLE && t != AVMEDIA_TYPE_DATA &&
+            t != AVMEDIA_TYPE_ATTACHMENT) {
+            need_probe = 1;
+            break;
+        }
+    }
+    if (ic->nb_streams == 0) {
+        need_probe = 1;
+    }
+    if (need_probe) {
+        ret = avformat_find_stream_info(ic, NULL);
+        if (ret < 0) {
+            goto done;
+        }
     }
 
     ret = avformat_alloc_output_context2(&oc, NULL, "hash", NULL);
@@ -117,18 +140,22 @@ int mc_stream_hash(const char *filename,
         goto done;
     }
 
+    // Stream copy: feed demuxed packets straight to the hash muxer in demux
+    // order. No decoding. av_write_frame (not av_interleaved_write_frame) —
+    // the interleaver would buffer and re-copy every packet to sort by DTS,
+    // which for a correctly interleaved file (the norm) leaves the byte stream
+    // the hash sees unchanged but doubles memory traffic on large files.
     while ((ret = av_read_frame(ic, pkt)) >= 0) {
         int oi = smap[pkt->stream_index];
         if (oi < 0) {
             av_packet_unref(pkt);
             continue;
         }
-        AVStream *in = ic->streams[pkt->stream_index];
-        AVStream *os = oc->streams[oi];
-        av_packet_rescale_ts(pkt, in->time_base, os->time_base);
         pkt->stream_index = oi;
         pkt->pos = -1;
-        ret = av_interleaved_write_frame(oc, pkt);
+        pkt->pts = AV_NOPTS_VALUE;
+        pkt->dts = AV_NOPTS_VALUE;
+        ret = av_write_frame(oc, pkt);
         av_packet_unref(pkt);
         if (ret < 0) {
             goto done;
@@ -140,6 +167,7 @@ int mc_stream_hash(const char *filename,
     if (ret < 0) {
         goto done;
     }
+    av_write_frame(oc, NULL); // flush any muxer-buffered data
 
     ret = av_write_trailer(oc);
     if (ret < 0) {

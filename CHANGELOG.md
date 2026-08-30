@@ -22,7 +22,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   .png .apng .gif .webp`) file, recursively for folders.
   - Video: hash of the encoded video+audio streams, ignoring container metadata
     (equivalent to `ffmpeg -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`) —
-    pure stream copy, never decoded.
+    pure stream copy, never decoded. Parsers (`AVFMT_FLAG_NOPARSE`), the
+    stream-info probe (when the header already types every stream) and the
+    packet interleaver are skipped — ~16% faster on large files, hash
+    unchanged for normally muxed inputs.
   - Image: hash of the decoded pixels, ignoring EXIF / XMP / ICC / text chunks.
   - FFmpeg's own `AV_LOG_ERROR` chatter about individual malformed packets
     (`Invalid NAL unit size`, `missing picture in access unit`, …) is silenced
