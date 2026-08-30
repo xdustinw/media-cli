@@ -50,7 +50,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`mc list [folder] [flags]`**: folder listing (folder defaults to the current
   directory; only its own files unless `-r` / `--recursive` is passed). Each file
   row is
-  `filename`, `size` (human readable), `mc.hash`, `rating`, `authors`, `tags`.
+  `filename`, `size` (human readable), `mc.hash`, `rating`, `artist`, `comment`.
   `mc.hash` is read from container metadata (video) or the imgmeta record
   (images).
   - `--format=toon|json` nests the rows under their folders
@@ -58,7 +58,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     absolute paths.
   - `--meta=title,make,...` adds metadata columns.
   - `--select='name=sample* and rating>=4 and size>1g and modifiedAt>2026-08-01'`
-    filters — fields `name/path/size/modifiedAt/rating/kind/format/authors/tags`
+    filters — fields `name/path/size/modifiedAt/rating/kind/format/artist/comment`
     or any metadata key, operators `= != > < >= <=` (`=` does a case-insensitive
     `*`/`?` wildcard match, OS-independent), size suffixes `k/m/g/t`, `and`/`or`.
   - `--sort-by='rating desc, size desc, name'` — multi-key, optional `desc`.
@@ -69,7 +69,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Video is remuxed with stream copy (pixels/streams and the `mc.hash` value
   unchanged, only container metadata rewritten); image tags go into the same
   native text store `mc.hash` uses (and shares the video remux's parser/probe
-  skips). Values may contain spaces; a `"…"` wrap keeps a comma inside a value.
+  skips). On MP4/MOV the metadata is written as standard iTunes-style atoms
+  (`©nam`/`©ART`/`©cmt`/…) so Windows Explorer and QuickTime display it — use
+  canonical field names (`artist`, `comment`, `title`, `genre`, `date`); keys
+  the MP4 muxer does not recognise are not retained and `mc set` warns.
+  Values may contain spaces; a `"…"` wrap keeps a comma inside a value.
   Only files matched by `--select` are probed deeply, and only when the filter
   needs it. Previews `key: <current> -> <new>` per file and confirms unless
   `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;

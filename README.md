@@ -127,7 +127,7 @@ mc list [folder] [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--forma
 
 Lists `[folder]` (default: current directory). Only that folder's own files are
 listed; pass `-r` / `--recursive` to descend into subfolders. Each file row is
-`filename`, `size`, `mc.hash`, `rating`, `authors`, `tags` (+ any `--meta`
+`filename`, `size`, `mc.hash`, `rating`, `artist`, `comment` (+ any `--meta`
 columns). `toon` and `json` nest the rows under their folders; `csv` is one flat
 table with absolute paths.
 
@@ -143,16 +143,16 @@ $ mc list tmp
 6 file(s)
 "tmp/":
   "img/":
-    files[2]{filename,size,mc.hash,rating,authors,tags}:
-      photo.jpg,84KB,4358a46e…d7,4,,vacation
+    files[2]{filename,size,mc.hash,rating,artist,comment}:
+      photo.jpg,84KB,4358a46e…d7,4,,summer trip
   "video/":
-    files[1]{filename,size,mc.hash,rating,authors,tags}:
+    files[1]{filename,size,mc.hash,rating,artist,comment}:
       clip.mp4,97MB,8f9b6e8b…37,,Adam Yu,
 ```
 
 - `--meta` – extra metadata columns, comma separated.
 - `--select` – keep matching files. Fields: `name`, `path`, `size`,
-  `modifiedAt`, `rating`, `kind`, `format`, `authors`, `tags`, or any metadata
+  `modifiedAt`, `rating`, `kind`, `format`, `artist`, `comment`, or any metadata
   key. Operators `= != > < >= <=`; `=` matches case-insensitively and supports
   `*` / `?` wildcards (`name=*trip*`), the same on every OS. Sizes take
   `k`/`m`/`g`/`t` suffixes; dates are `YYYY-MM-DD`. Combine with `and` / `or`.
@@ -177,14 +177,19 @@ directory — that match `--select`. Only that folder's own files are considered
 pass `-r` / `--recursive` to descend into subfolders.
 
 ```bash
-mc set 'rating=3,author=Adam' -r ~/Photos --select='name=3*Adam*'
-mc set 'title=Trip 2026' ~/Videos --select='name=DSC*' -y
-mc set 'author="Doe, Jane"' ~/Photos --select='author=old-name'   # quote to keep a comma
+mc set 'rating=3,artist=Adam' -r ~/Photos --select='name=3*Adam*'
+mc set 'title=Trip 2026,comment=family' ~/Videos --select='name=DSC*' -y
+mc set 'artist="Doe, Jane"' ~/Photos --select='artist=old-name'   # quote to keep a comma
 ```
 
 - Video files are **remuxed with stream copy** — pixels and streams are
   untouched, so the `mc hash` value does not change; only the container metadata
   is rewritten.
+- Video metadata is written as standard MP4/MOV atoms (`©nam`, `©ART`, `©cmt`,
+  …), so **Windows Explorer and QuickTime show it**. Use canonical field names —
+  `artist`, `comment`, `title`, `genre`, `date`. Keys the MP4 muxer doesn't
+  recognise (e.g. a bare `rating` on a video) aren't retained; `mc set` warns
+  when that happens.
 - Image tags go into the file's native text area (PNG `tEXt`, JPEG `COM`, GIF
   comment, WebP chunk), the same store `mc.hash` uses. `mc list` / `mc info`
   read them back.

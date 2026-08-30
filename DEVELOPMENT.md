@@ -28,10 +28,14 @@
   and dimensions), so EXIF / XMP / ICC / text chunks never affect it.
 - **Tag writes** never touch pixel or stream data. MP4/MKV container metadata
   cannot be patched in place, so `ffmpeg.WriteTags` **remuxes the whole file**
-  with stream copy (`-movflags use_metadata_tags` for MP4/MOV) — a read + write
-  pass over every byte, comparable in cost to hashing it, and unavoidable for
-  video. It reuses the pre-computed hash (nothing is re-hashed after
-  confirmation) and applies the same parser/probe skips as `mc_stream_hash`.
+  with stream copy — a read + write pass over every byte, comparable in cost to
+  hashing it, and unavoidable for video. It reuses the pre-computed hash
+  (nothing is re-hashed after confirmation) and applies the same parser/probe
+  skips as `mc_stream_hash`. Its `movFreeform` argument selects the MP4/MOV
+  metadata style: `mc hash` passes `true` (the `mdta` key box, so the
+  non-standard `mc.hash` key survives); `mc set` passes `false` (iTunes `©`
+  atoms, which the mp4 muxer only keeps for known fields but which Windows
+  Explorer and QuickTime read).
   Images are cheap: `internal/imgmeta` inserts a native text record (PNG `tEXt`,
   JPEG `COM`, GIF comment, WebP private `mcTG` chunk) without re-encoding. That
   reader/writer is a matched pair — values are not guaranteed to round-trip

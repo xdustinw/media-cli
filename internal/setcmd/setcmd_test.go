@@ -11,9 +11,29 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/xdustinw/media-cli/internal/ffmpeg"
 	"github.com/xdustinw/media-cli/internal/imgmeta"
 	"github.com/xdustinw/media-cli/internal/tag"
 )
+
+// sampleMP4 copies one of the repo owner's sample clips (../../tmp/video) into
+// dir; the test is skipped when none are present.
+func sampleMP4(t *testing.T, dir string) string {
+	t.Helper()
+	m, _ := filepath.Glob(filepath.Join("..", "..", "tmp", "video", "sample-r*.mp4"))
+	if len(m) == 0 {
+		t.Skip("no sample mp4 in tmp/video")
+	}
+	dst := filepath.Join(dir, "clip.mp4")
+	b, err := os.ReadFile(m[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
 
 func writePNG(t *testing.T, path string) {
 	t.Helper()
@@ -73,6 +93,41 @@ func TestSetSelectedFiles(t *testing.T) {
 	// non-matching file untouched
 	if all, _ := imgmeta.ReadAll(filepath.Join(root, "other.png")); len(all) != 0 {
 		t.Fatalf("other.png should be untouched: %v", all)
+	}
+}
+
+func TestSetVideoWritesStandardAtoms(t *testing.T) {
+	root := t.TempDir()
+	clip := sampleMP4(t, root)
+
+	tags, _ := tag.Parse("artist=Adam Yu,comment=hello world")
+	_, errOut := run(t, Options{
+		Target: clip, Tags: tags, Extensions: []string{".mp4"}, AssumeYes: true,
+	})
+	if strings.Contains(errOut, "will not be stored") {
+		t.Fatalf("artist/comment are standard fields, should not warn:\n%s", errOut)
+	}
+
+	// Written as iTunes ilst atoms (©ART/©cmt) — no mdta freeform box needed —
+	// which is what the mov demuxer maps back and what Windows/QuickTime read.
+	if v, err := ffmpeg.ReadTag(clip, "artist"); err != nil || v != "Adam Yu" {
+		t.Fatalf("artist read back as %q, %v", v, err)
+	}
+	if v, err := ffmpeg.ReadTag(clip, "comment"); err != nil || v != "hello world" {
+		t.Fatalf("comment read back as %q, %v", v, err)
+	}
+}
+
+func TestSetVideoWarnsOnNonStandardKey(t *testing.T) {
+	root := t.TempDir()
+	clip := sampleMP4(t, root)
+
+	tags, _ := tag.Parse("rating=3")
+	_, errOut := run(t, Options{
+		Target: clip, Tags: tags, Extensions: []string{".mp4"}, AssumeYes: true,
+	})
+	if !strings.Contains(errOut, "rating") || !strings.Contains(errOut, "will not be stored") {
+		t.Fatalf("expected a drop warning for 'rating' on mp4:\n%s", errOut)
 	}
 }
 

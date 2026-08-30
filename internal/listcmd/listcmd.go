@@ -37,7 +37,7 @@ type Options struct {
 }
 
 // fixedColumns precede the configurable hash column and the --meta columns.
-var fixedColumns = []string{"filename", "size", "rating", "authors", "tags"}
+var fixedColumns = []string{"filename", "size", "rating", "artist", "comment"}
 
 func (o Options) hashKey() string {
 	if o.HashKey == "" {
@@ -47,9 +47,9 @@ func (o Options) hashKey() string {
 }
 
 // columns is the full ordered column list: filename, size, <hash key>, rating,
-// authors, tags, then any extra --meta columns.
+// artist, comment, then any extra --meta columns.
 func (o Options) columns(extra []string) []string {
-	cols := []string{"filename", "size", o.hashKey(), "rating", "authors", "tags"}
+	cols := []string{"filename", "size", o.hashKey(), "rating", "artist", "comment"}
 	return append(cols, extra...)
 }
 
@@ -197,13 +197,15 @@ func fileOM(f *mediainfo.File, hashKey string, extra []string) *render.OM {
 	if r, ok := f.Rating(); ok {
 		rating = r
 	}
+	artist, _ := f.Meta("artist")
+	comment, _ := f.Meta("comment")
 	o := render.NewOM(
 		"filename", f.Name,
 		"size", mediainfo.HumanSize(f.Size),
 		hashKey, hash,
 		"rating", rating,
-		"authors", strings.Join(f.Authors(), "; "),
-		"tags", strings.Join(f.Tags(), "; "),
+		"artist", artist,
+		"comment", comment,
 	)
 	for _, m := range extra {
 		v, _ := f.Meta(m)
@@ -218,13 +220,15 @@ func csvRow(f *mediainfo.File, absRoot, hashKey string, meta []string) []any {
 	if r, ok := f.Rating(); ok {
 		rating = r
 	}
+	artist, _ := f.Meta("artist")
+	comment, _ := f.Meta("comment")
 	cells := []any{
 		f.Abs, // CSV always carries the absolute path
 		mediainfo.HumanSize(f.Size),
 		hash,
 		rating,
-		strings.Join(f.Authors(), "; "),
-		strings.Join(f.Tags(), "; "),
+		artist,
+		comment,
 	}
 	for _, m := range meta {
 		v, _ := f.Meta(m)

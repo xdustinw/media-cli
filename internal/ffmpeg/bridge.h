@@ -28,16 +28,24 @@ int mc_image_hash(const char *filename,
                   char *errbuf, size_t errbuf_size);
 
 // mc_write_tags remuxes infile to outfile with stream copy, preserving all
-// streams, dispositions and existing metadata, and sets each of the n freeform
-// global tags keys[i]=values[i]. For MP4/MOV outputs it enables
-// use_metadata_tags so arbitrary keys survive. Mirrors:
+// streams, dispositions and existing metadata, and sets each of the n global
+// tags keys[i]=values[i]. Mirrors:
 //
 //   ffmpeg -i <in> -map 0 -c copy -map_metadata 0 \
-//          -movflags use_metadata_tags -metadata k1=v1 -metadata k2=v2 <out>
+//          [-movflags use_metadata_tags] -metadata k1=v1 -metadata k2=v2 <out>
+//
+// mov_freeform controls MP4/MOV metadata style:
+//   0 - iTunes-style ilst atoms (©nam/©ART/©cmt/…). Only keys FFmpeg's mp4
+//       muxer knows are retained, but those are read by Windows Explorer and
+//       QuickTime.
+//   1 - the "mdta" key/value box, so arbitrary keys (e.g. mc.hash) survive a
+//       round-trip. Not read by Windows Explorer.
+// It has no effect on non-MP4/MOV outputs.
 //
 // Returns 0 on success or a negative AVERROR code (message in errbuf).
 int mc_write_tags(const char *infile, const char *outfile,
                   const char *const *keys, const char *const *values, int n,
+                  int mov_freeform,
                   char *errbuf, size_t errbuf_size);
 
 // mc_read_tag reads the freeform global tag key from filename into out.

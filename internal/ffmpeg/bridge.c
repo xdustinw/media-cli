@@ -410,6 +410,7 @@ static int muxer_is_mov(const AVOutputFormat *ofmt) {
 
 int mc_write_tags(const char *infile, const char *outfile,
                   const char *const *keys, const char *const *values, int n,
+                  int mov_freeform,
                   char *errbuf, size_t errbuf_size) {
     AVFormatContext *ic = NULL;
     AVFormatContext *oc = NULL;
@@ -486,7 +487,11 @@ int mc_write_tags(const char *infile, const char *outfile,
     }
     ret = 0;
 
-    if (muxer_is_mov(oc->oformat)) {
+    // For MP4/MOV, only enable the "mdta" freeform key box when the caller
+    // needs arbitrary keys to survive (e.g. `mc hash` storing mc.hash). `mc set`
+    // leaves it off so standard fields land in the iTunes ilst atoms that
+    // Windows Explorer and QuickTime read.
+    if (mov_freeform && muxer_is_mov(oc->oformat)) {
         av_opt_set(oc->priv_data, "movflags", "+use_metadata_tags", 0);
     }
 

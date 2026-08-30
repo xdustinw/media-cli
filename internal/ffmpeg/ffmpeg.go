@@ -120,17 +120,23 @@ func ImageHash(path string) (string, error) {
 }
 
 // WriteTag remuxes src to dst (stream copy, all streams and metadata preserved)
-// and sets the freeform global tag key=value.
+// and sets the freeform global tag key=value. On MP4/MOV the mdta key box is
+// used so a non-standard key (e.g. mc.hash) survives.
 func WriteTag(src, dst, key, value string) error {
-	return WriteTags(src, dst, []string{key}, []string{value})
+	return WriteTags(src, dst, []string{key}, []string{value}, true)
 }
 
 // WriteTags is WriteTag for several keys at once (one remux). keys and values
 // are parallel slices. dst must not already exist and its extension selects the
 // container. Equivalent to `ffmpeg -i <src> -map 0 -c copy -map_metadata 0
-// -metadata k1=v1 -metadata k2=v2 <dst>` (with -movflags use_metadata_tags for
-// MP4/MOV).
-func WriteTags(src, dst string, keys, values []string) error {
+// -metadata k1=v1 -metadata k2=v2 <dst>`.
+//
+// movFreeform selects the MP4/MOV metadata style: true keeps arbitrary keys via
+// the mdta box (round-trips through mc, invisible to Windows); false writes the
+// iTunes ilst atoms that Windows Explorer and QuickTime read, at the cost of
+// dropping keys the mp4 muxer does not recognise. It is ignored for other
+// containers.
+func WriteTags(src, dst string, keys, values []string, movFreeform bool) error {
 	if len(keys) != len(values) {
 		return fmt.Errorf("write tags %s: %d keys but %d values", src, len(keys), len(values))
 	}
@@ -152,10 +158,15 @@ func WriteTags(src, dst string, keys, values []string) error {
 		}
 	}()
 
+	movFF := C.int(0)
+	if movFreeform {
+		movFF = 1
+	}
+
 	errbuf := make([]C.char, errBufLen)
 	rc := C.mc_write_tags(cSrc, cDst,
 		(**C.char)(unsafe.Pointer(&ck[0])), (**C.char)(unsafe.Pointer(&cv[0])),
-		C.int(len(keys)), &errbuf[0], C.size_t(len(errbuf)))
+		C.int(len(keys)), movFF, &errbuf[0], C.size_t(len(errbuf)))
 	if rc < 0 {
 		return avError("write tags "+src, rc, &errbuf[0])
 	}

@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/xdustinw/media-cli/internal/ffmpeg"
@@ -115,6 +117,13 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
+	// MP4/MOV metadata is written as iTunes-style atoms so Windows can read it;
+	// keys outside that vocabulary are silently dropped by the muxer. Warn once.
+	if dropped := unsupportedMP4Keys(targets, o.Tags); len(dropped) > 0 {
+		fmt.Fprintf(o.Stderr, "  ! MP4/MOV keeps only standard fields; %s will not be stored on those files\n",
+			strings.Join(dropped, ", "))
+	}
+
 	if !o.AssumeYes {
 		ok := false
 		if o.Confirm != nil {
@@ -164,7 +173,9 @@ func apply(f *mediainfo.File, tags tag.Set) error {
 	var werr error
 	switch f.Kind {
 	case media.KindVideo:
-		werr = ffmpeg.WriteTags(f.Abs, tmp, tags.Keys(), tags.Values())
+		// Write standard iTunes-style atoms (no mdta freeform box) so the
+		// fields are visible to Windows Explorer and QuickTime.
+		werr = ffmpeg.WriteTags(f.Abs, tmp, tags.Keys(), tags.Values(), false)
 	case media.KindImage:
 		if !imgmeta.Supported(f.Abs) {
 			return fmt.Errorf("setting metadata on %s images is not supported", filepath.Ext(f.Abs))
@@ -183,6 +194,48 @@ func apply(f *mediainfo.File, tags tag.Set) error {
 		return err
 	}
 	return nil
+}
+
+// mp4RetainedKeys are the global metadata keys FFmpeg's mp4/mov muxer keeps in
+// the iTunes-style ilst atom (see libavformat/movenc.c mov_write_ilst_tag).
+// Anything else is dropped when metadata is not written as freeform mdta.
+var mp4RetainedKeys = map[string]bool{
+	"title": true, "artist": true, "album_artist": true, "composer": true,
+	"album": true, "date": true, "comment": true, "genre": true,
+	"copyright": true, "grouping": true, "lyrics": true, "description": true,
+	"synopsis": true, "show": true, "episode_id": true, "network": true,
+	"keywords": true, "encoding_tool": true,
+}
+
+// unsupportedMP4Keys returns the sorted, de-duplicated tag keys that would be
+// lost when written onto any MP4/MOV file in targets.
+func unsupportedMP4Keys(targets []*mediainfo.File, tags tag.Set) []string {
+	hasMP4 := false
+	for _, f := range targets {
+		if f.Kind != media.KindVideo {
+			continue
+		}
+		c := f.ContainerFormat()
+		if strings.Contains(c, "mp4") || strings.Contains(c, "mov") ||
+			strings.Contains(c, "m4a") || strings.Contains(c, "3gp") {
+			hasMP4 = true
+			break
+		}
+	}
+	if !hasMP4 {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range tags {
+		k := strings.ToLower(p.Key)
+		if !mp4RetainedKeys[k] && !seen[k] {
+			seen[k] = true
+			out = append(out, p.Key)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func summaryErr(scanErrs int) error {

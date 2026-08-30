@@ -21,12 +21,17 @@ var setCmd = &cobra.Command{
 [folder] (default: current directory). Only that folder's own files are
 considered; pass -r/--recursive to descend into subdirectories.
 
-  mc set 'rating=3,author=Adam' ~/Photos --select='name=3*Adam*'
+  mc set 'rating=3,artist=Adam' ~/Photos --select='name=3*Adam*'
 
 Values may contain spaces; wrap a value in double quotes to keep a comma inside
-it ('author="Doe, Jane"'). Video files are remuxed with stream copy (pixels and
+it ('artist="Doe, Jane"'). Video files are remuxed with stream copy (pixels and
 streams untouched); image tags are stored in the file's native text area (PNG
 tEXt, JPEG COM, GIF comment, WebP chunk).
+
+Video metadata is written as standard MP4/MOV atoms so it shows up in Windows
+Explorer and QuickTime — use canonical field names like artist, comment, title,
+genre and date. Keys the MP4 muxer does not recognise (e.g. a bare rating on a
+video) are not retained and a warning is printed.
 
 You are strongly encouraged to pass --select — without it every media file in
 the folder is updated. The change is previewed and confirmed (unless -y).`,

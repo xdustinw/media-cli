@@ -77,7 +77,7 @@ func TestListBasic(t *testing.T) {
 		`"sub/":`,              // nested folder key
 		"small.jpg",            // file listed under sub/ by basename
 		"big.png", "notes.txt", // root-level files
-		"{filename,size,mc.hash,rating,authors,tags}:", // flat tabular rows
+		"{filename,size,mc.hash,rating,artist,comment}:", // flat tabular rows
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
