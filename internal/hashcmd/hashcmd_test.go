@@ -69,6 +69,19 @@ func TestRunTagsRenamesAndIsIdempotent(t *testing.T) {
 		t.Fatalf("run: %v\nstderr: %s", err, errb.String())
 	}
 
+	// The preview streams one line per file (with its hash and target name)
+	// before the summary — not a batch list afterwards.
+	so := out.String()
+	preIdx := strings.Index(so, "Preview")
+	movieIdx := strings.Index(so, "movie.mp4  ")
+	summaryIdx := strings.Index(so, "file(s) —")
+	if preIdx < 0 || movieIdx < preIdx || summaryIdx < movieIdx {
+		t.Fatalf("expected streamed per-file preview before the summary:\n%s", so)
+	}
+	if !strings.Contains(so, "movie.mp4  8f9b6e8b376998734a08110d2d75e137  ->  movie.8f9b6e.mp4") {
+		t.Fatalf("preview line missing hash/target name:\n%s", so)
+	}
+
 	var renamed []string
 	filepath.WalkDir(root, func(p string, d os.DirEntry, _ error) error {
 		if d != nil && !d.IsDir() {

@@ -73,7 +73,7 @@ Global flags: `-v/--verbose`, `--debug`, `--config <path>`.
 ### `mc hash`
 
 ```
-mc hash <file or folder> [-y]
+mc hash <file or folder> [-y] [-f]
 ```
 
 Hash media by content, then write the hash into the file and rename it.
@@ -82,6 +82,7 @@ Hash media by content, then write the hash into the file and rename it.
 mc hash movie.mp4              # hash one file, confirm changes
 mc hash ~/Videos              # recurse a folder
 mc hash ~/Photos -y           # no confirmation prompt
+mc hash ~/Photos -f           # re-hash even files that already have mc.hash
 ```
 
 | | |
@@ -89,15 +90,28 @@ mc hash ~/Photos -y           # no confirmation prompt
 | **Video** `.mp4 .mkv .mov .m4v .webm .avi` | MD5 of the encoded video+audio streams — container metadata ignored |
 | **Images** `.jpg .jpeg .png .gif .webp` (+ `.jpe .jfif .apng`) | MD5 of the decoded pixels — EXIF / XMP / ICC / comments ignored |
 
-For each file it prints `<hash> - <path>`, shows a preview, then (after `[y/N]`
-or with `-y`):
+As each file is processed it prints a preview line — `+` write & rename, `»`
+rename only (tag already correct), `~` re-tag stale, `=` already current — so
+progress is visible on large folders:
+
+```
+Preview (mc.hash):
+  + trip/IMG_1.jpg  6cb96fb6…98e5  ->  trip/IMG_1.6cb96f.jpg
+  = trip/IMG_2.fbc6ec.jpg  fbc6ec44…409b
+```
+
+Then, after `[y/N]` (or with `-y`), for each pending file it:
 
 1. writes the tag `mc.hash=<hash>` into the file — pixels and streams are left
    byte-for-byte untouched;
 2. renames it to `<name>.<first 6 of hash>.<ext>`.
 
-Files already hashed and named are skipped. A file whose stored `mc.hash` no
-longer matches its content gets a warning and is re-tagged.
+**By default a file that already carries a valid `mc.hash` tag is trusted and
+not re-hashed** — the stored value is used directly, so re-running on a large,
+already-processed folder is near-instant (and files that only need renaming are
+moved, not remuxed). Pass `-f` / `--force` to re-compute every hash and compare
+it with the stored tag; a mismatch is flagged (`~`, "stale mc.hash … replaced")
+and the tag rewritten.
 
 ### `mc list`
 
@@ -105,14 +119,27 @@ longer matches its content gets a warning and is re-tagged.
 mc list <folder> [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--format=toon|json|csv]
 ```
 
-Walks `<folder>` recursively and prints one flat row per file: `filename`,
-`size`, `mc.hash`, `rating`, `authors`, `tags`.
+Walks `<folder>` recursively. Each file row is `filename`, `size`, `mc.hash`,
+`rating`, `authors`, `tags` (+ any `--meta` columns). `toon` and `json` nest the
+rows under their folders; `csv` is one flat table with absolute paths.
 
 ```bash
 mc list ~/Photos
 mc list ~/Photos --meta=make,model,DateTimeOriginal
 mc list ~/Videos --select='rating>=4 and size>1g' --sort-by='rating desc, size desc'
-mc list ~/Photos --format=csv > inventory.csv          # csv rows carry absolute paths
+mc list ~/Photos --format=csv > inventory.csv          # flat, absolute paths
+```
+
+```
+$ mc list tmp
+6 file(s)
+"tmp/":
+  "img/":
+    files[2]{filename,size,mc.hash,rating,authors,tags}:
+      photo.jpg,84KB,4358a46e…d7,4,,vacation
+  "video/":
+    files[1]{filename,size,mc.hash,rating,authors,tags}:
+      clip.mp4,97MB,8f9b6e8b…37,,Adam Yu,
 ```
 
 - `--meta` – extra metadata columns, comma separated.
@@ -120,7 +147,8 @@ mc list ~/Photos --format=csv > inventory.csv          # csv rows carry absolute
   `modifiedAt`, `rating`, `kind`, `format`, `authors`, `tags`, or any metadata
   key. Operators `= != > < >= <=` (`=` supports `*`/`?` globs); sizes take
   `k`/`m`/`g`/`t` suffixes; dates are `YYYY-MM-DD`. Combine with `and` / `or`.
-- `--sort-by` – comma-separated keys, each optionally `desc` (default `name`).
+- `--sort-by` – comma-separated keys, each optionally `desc` (default `name`);
+  folders are always alphabetical.
 - `--format` – `toon` (default), `json`, or `csv`.
 
 ### `mc info`

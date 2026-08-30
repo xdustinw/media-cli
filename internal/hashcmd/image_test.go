@@ -109,46 +109,73 @@ func onlyMatch(t *testing.T, dir, glob string) string {
 	return m[0]
 }
 
-// TestSkipAndStaleWarning covers the two tag-state paths: an up-to-date file is
-// left untouched on a re-run, and a file whose stored mc.hash no longer matches
-// its content is warned about and re-tagged.
-func TestSkipAndStaleWarning(t *testing.T) {
+func runHash(t *testing.T, root string, force bool) (stdout, stderr string) {
+	t.Helper()
+	var o, e bytes.Buffer
+	err := Run(context.Background(), Options{
+		Target: root, Extensions: []string{".png"}, MetadataKey: "mc.hash",
+		NameLength: 6, AssumeYes: true, Force: force,
+		Stdout: &o, Stderr: &e, Logger: quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("run: %v (stderr %s)", err, e.String())
+	}
+	return o.String(), e.String()
+}
+
+// TestDefaultTrustsExistingTag: a file with a valid mc.hash tag is not
+// re-hashed by default — the stored value is taken as the hash verbatim.
+func TestDefaultTrustsExistingTag(t *testing.T) {
+	root := t.TempDir()
+	writeImage(t, filepath.Join(root, "pic.png"))
+	runHash(t, root, false) // tag + rename
+
+	tagged := onlyMatch(t, root, "pic.*.png")
+	tmp := filepath.Join(root, "tmp.png")
+	// A different but still hash-shaped value.
+	const fake = "0123456789abcdef0123456789abcdef"
+	if err := imgmeta.Write(tagged, tmp, "mc.hash", fake); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, tagged); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _ := runHash(t, root, false)
+	if !strings.Contains(stdout, fake) {
+		t.Fatalf("default run should echo the stored tag, not a recomputed hash:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "stale mc.hash") {
+		t.Fatalf("default run must not detect staleness:\n%s", stdout)
+	}
+}
+
+// TestForceDetectsStaleTag: --force re-hashes and catches a stored mc.hash that
+// no longer matches the content.
+func TestForceDetectsStaleTag(t *testing.T) {
 	root := t.TempDir()
 	writeImage(t, filepath.Join(root, "keep.png"))
 	writeImage(t, filepath.Join(root, "stale.png"))
+	runHash(t, root, false)
 
-	run := func() (stdout, stderr string) {
-		var o, e bytes.Buffer
-		if err := Run(context.Background(), Options{
-			Target: root, Extensions: []string{".png"}, MetadataKey: "mc.hash",
-			NameLength: 6, AssumeYes: true, Stdout: &o, Stderr: &e, Logger: quietLogger(),
-		}); err != nil {
-			t.Fatalf("run: %v (stderr %s)", err, e.String())
-		}
-		return o.String(), e.String()
-	}
-
-	run() // first pass: tag + rename both
-
-	// Overwrite stale's stored tag so it no longer matches the pixels.
-	staleTagged := onlyMatch(t, root, "stale.*.png")
+	stale := onlyMatch(t, root, "stale.*.png")
 	tmp := filepath.Join(root, "tmp.png")
-	if err := imgmeta.Write(staleTagged, tmp, "mc.hash", "dead00000000000000000000000000ff"); err != nil {
+	if err := imgmeta.Write(stale, tmp, "mc.hash", "dead00000000000000000000000000ff"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(tmp, staleTagged); err != nil {
+	if err := os.Rename(tmp, stale); err != nil {
 		t.Fatal(err)
 	}
 
-	stdout, stderr := run()
-	if !strings.Contains(stderr, "content hash changed") {
-		t.Fatalf("expected stale-tag warning on stderr, got: %q", stderr)
+	stdout, _ := runHash(t, root, true)
+	if !strings.Contains(stdout, "stale mc.hash") || !strings.Contains(stdout, "replaced") {
+		t.Fatalf("expected a stale-tag note under --force:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "1 file(s) already up to date, skipped") {
-		t.Fatalf("expected keep.png reported as skipped, got: %q", stdout)
+	if !strings.Contains(stdout, "~ stale.") {
+		t.Fatalf("expected a re-tag line for stale.png:\n%s", stdout)
 	}
-	// stale.png keeps its name (prefix already right) but is re-tagged.
-	if v, err := imgmeta.Read(staleTagged, "mc.hash"); err != nil || strings.HasPrefix(v, "dead") {
+	stale = onlyMatch(t, root, "stale.*.png")
+	if v, err := imgmeta.Read(stale, "mc.hash"); err != nil || strings.HasPrefix(v, "dead") {
 		t.Fatalf("stale tag not refreshed: %q %v", v, err)
 	}
 }

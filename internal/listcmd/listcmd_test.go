@@ -70,17 +70,24 @@ func run(t *testing.T, o Options) string {
 func TestListBasic(t *testing.T) {
 	root := fixtures(t)
 	got := run(t, Options{Root: root, Format: render.TOON})
-	for _, want := range []string{"big.png", "sub/small.jpg", "notes.txt", "3 file(s)"} {
+	base := filepath.Base(root)
+	for _, want := range []string{
+		"3 file(s)",
+		`"` + base + `/":`,     // root folder key
+		`"sub/":`,              // nested folder key
+		"small.jpg",            // file listed under sub/ by basename
+		"big.png", "notes.txt", // root-level files
+		"{filename,size,mc.hash,rating,authors,tags}:", // flat tabular rows
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}
 	}
-	// One flat tabular block with the mc.hash column, not an object per row.
-	if !strings.Contains(got, "{filename,size,mc.hash,rating,authors,tags}:") {
-		t.Fatalf("expected a flat TOON table header:\n%s", got)
+	if strings.Contains(got, "sub/small.jpg") {
+		t.Fatalf("nested file should be listed by basename under its folder:\n%s", got)
 	}
 	if strings.Contains(got, "- filename:") {
-		t.Fatalf("output should not be one attribute per row:\n%s", got)
+		t.Fatalf("rows should be flat, not one attribute per line:\n%s", got)
 	}
 }
 
@@ -117,22 +124,36 @@ func TestListSelectAndSort(t *testing.T) {
 	}
 }
 
-func TestListJSON(t *testing.T) {
+func TestListJSONHierarchy(t *testing.T) {
 	root := fixtures(t)
 	got := run(t, Options{Root: root, Format: render.JSON, Meta: []string{"format"}})
-	var rows []map[string]any
-	if err := json.Unmarshal([]byte(got), &rows); err != nil {
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(got), &doc); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, got)
 	}
-	if len(rows) != 3 {
-		t.Fatalf("want 3 rows, got %d", len(rows))
+	rootObj, ok := doc[filepath.Base(root)+"/"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing root folder key: %v", doc)
 	}
-	for _, r := range rows {
-		if _, ok := r["filename"]; !ok {
-			t.Fatalf("row missing filename: %v", r)
-		}
-		if _, ok := r["format"]; !ok {
-			t.Fatalf("row missing requested meta column 'format': %v", r)
-		}
+	sub, ok := rootObj["sub/"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing sub/ folder: %v", rootObj)
+	}
+	subFiles, ok := sub["files"].([]any)
+	if !ok || len(subFiles) != 1 {
+		t.Fatalf("sub/ should hold 1 file: %v", sub["files"])
+	}
+	f0 := subFiles[0].(map[string]any)
+	if f0["filename"] != "small.jpg" {
+		t.Fatalf("nested file name should be a basename: %v", f0)
+	}
+	if _, ok := f0["format"]; !ok {
+		t.Fatalf("requested --meta column 'format' missing: %v", f0)
+	}
+
+	rootFiles, ok := rootObj["files"].([]any)
+	if !ok || len(rootFiles) != 2 { // big.png, notes.txt
+		t.Fatalf("root should hold 2 direct files: %v", rootObj["files"])
 	}
 }

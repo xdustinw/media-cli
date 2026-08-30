@@ -11,7 +11,10 @@ import (
 	"github.com/xdustinw/media-cli/internal/hashcmd"
 )
 
-var flagAssumeYes bool
+var (
+	flagAssumeYes bool
+	flagHashForce bool
+)
 
 var hashCmd = &cobra.Command{
 	Use:   "hash <file or folder>",
@@ -26,13 +29,16 @@ var hashCmd = &cobra.Command{
 
 Two files that differ only in metadata produce the same hash.
 
-Given a directory, matching files are processed recursively. After listing
-"<hash> - <path>" for each file, you are asked to confirm writing the hash as a
-freeform tag ('mc.hash=<hash>') and renaming each file to
+Given a directory, matching files are processed recursively. As each file is
+processed a preview line is printed; then you confirm writing the tag
+'mc.hash=<hash>' and renaming each file to
 
     <name>.<first 6 of hash>.<ext>
 
-Pass -y to skip the confirmation.`,
+By default a file that already carries a valid 'mc.hash' tag is trusted and not
+re-hashed (fast on large, already-processed folders). Pass -f/--force to
+re-compute every hash and compare it with the stored tag. Pass -y to skip the
+confirmation.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("yes") {
@@ -46,6 +52,7 @@ Pass -y to skip the confirmation.`,
 			MetadataKey: vip.GetString(config.KeyHashMetaKey),
 			NameLength:  vip.GetInt(config.KeyHashNameLen),
 			AssumeYes:   vip.GetBool(config.KeyAssumeYes),
+			Force:       flagHashForce,
 			Stdout:      cmd.OutOrStdout(),
 			Stderr:      cmd.ErrOrStderr(),
 			Confirm: func(prompt string) (bool, error) {
@@ -64,6 +71,7 @@ Pass -y to skip the confirmation.`,
 
 func init() {
 	hashCmd.Flags().BoolVarP(&flagAssumeYes, "yes", "y", false, "skip confirmation and apply changes")
+	hashCmd.Flags().BoolVarP(&flagHashForce, "force", "f", false, "re-hash files that already have an mc.hash tag")
 	_ = vip.BindPFlag(config.KeyAssumeYes, hashCmd.Flags().Lookup("yes"))
 	rootCmd.AddCommand(hashCmd)
 }
