@@ -34,7 +34,6 @@ jobs:
           - { asset: mc-linux-amd64,       runs-on: ubuntu-latest, goos: linux,   goarch: amd64, cross: false }
           - { asset: mc-windows-amd64.exe, runs-on: ubuntu-latest, goos: windows, goarch: amd64, cross: true  }
           - { asset: mc-darwin-arm64,      runs-on: macos-latest,  goos: darwin,  goarch: arm64, cross: false }
-          - { asset: mc-darwin-amd64,      runs-on: macos-13,      goos: darwin,  goarch: amd64, cross: false }
 
     steps:
       - uses: actions/checkout@v4
@@ -83,10 +82,16 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          [ "${{ matrix.cross }}" = "true" ] && export CC=x86_64-w64-mingw32-gcc
+          EXTRA=""
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            export CC=x86_64-w64-mingw32-gcc
+            # Fully static .exe — no zlib1.dll / libgcc_s / libwinpthread / libssp
+            # runtime dependencies on the target machine.
+            EXTRA="-extldflags=-static"
+          fi
           mkdir -p dist
           go build -trimpath \
-            -ldflags "-s -w -X 'github.com/xdustinw/media-cli/cmd.buildVersion=${{ steps.v.outputs.version }}'" \
+            -ldflags "-s -w -X 'github.com/xdustinw/media-cli/cmd.buildVersion=${{ steps.v.outputs.version }}' $EXTRA" \
             -o "dist/${{ matrix.asset }}" .
 
       - name: Smoke test (native targets only)
@@ -144,7 +149,7 @@ jobs:
         run: |
           awk '/^## /{n++; next} n==1{print}' CHANGELOG.md > release-notes.md
           {
-            printf '\nBuild `%s` — linux/amd64, windows/amd64, darwin/arm64, darwin/amd64\n' \
+            printf '\nBuild `%s` — linux/amd64, windows/amd64 (static), darwin/arm64\n' \
               "${{ steps.meta.outputs.version }}"
             printf '\nBinaries statically link FFmpeg (LGPL-2.1-or-later, no GPL/nonfree parts). '
             printf 'See `THIRD-PARTY-NOTICES.md` in the assets.\n'

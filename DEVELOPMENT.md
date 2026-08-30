@@ -72,6 +72,10 @@ libraries appended (`-latomic -lpthread` on Linux, `-liconv` on macOS,
 `-lbcrypt -lws2_32 -lsecur32 -lole32 -luser32` on Windows). Building for a
 platform whose libraries are absent fails at link with the missing `.a` path.
 
+The Windows binary is built with `-ldflags -extldflags=-static` so zlib, libgcc,
+libwinpthread and libssp are linked in and the `.exe` has no DLL dependencies
+beyond the OS's own (`kernel32`, `bcrypt`, …).
+
 The C bridge is `internal/ffmpeg/bridge.c` / `bridge.h`.
 
 ## Versioning
@@ -88,19 +92,19 @@ Per `CLAUDE.md`, a "version update" refreshes `CHANGELOG.md` and writes
 
 ## Releases (CI)
 
-`.github/workflows/release.yml` builds four binaries — each on a matching runner,
-building its own static FFmpeg from the pinned `FFMPEG_COMMIT` so content hashes
-are identical across platforms — then publishes one GitHub Release.
+`.github/workflows/release.yml` builds three binaries — each on a matching
+runner, building its own static FFmpeg from the pinned `FFMPEG_COMMIT` so content
+hashes are identical across platforms — then publishes one GitHub Release.
 
 | Asset | Runner | Build |
 | --- | --- | --- |
 | `mc-linux-amd64` | `ubuntu-latest` | native |
 | `mc-darwin-arm64` | `macos-latest` | native |
-| `mc-darwin-amd64` | `macos-13` | native |
-| `mc-windows-amd64.exe` | `ubuntu-latest` | mingw-w64 cross |
+| `mc-windows-amd64.exe` | `ubuntu-latest` | mingw-w64 cross, `-extldflags=-static` (no DLL deps) |
 
-`go test ./...` runs on the three native targets before their build (the Windows
-cross build is not executed in CI).
+`go test ./...` runs on the two native targets before their build (the Windows
+cross build is not executed in CI). Intel macOS is not built — contributors on
+that platform run `scripts/build-ffmpeg.sh` then `go build`.
 
 | Trigger | Result |
 | --- | --- |

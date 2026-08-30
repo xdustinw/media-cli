@@ -66,9 +66,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mc version` now prints the bundled FFmpeg version and license. Releases
   attach `THIRD-PARTY-NOTICES.md`. The build enables no GPL/nonfree parts.
 - **Release workflow** (`.github/workflows/release.yml`): builds
-  `mc-linux-amd64`, `mc-darwin-arm64`, `mc-darwin-amd64` and
-  `mc-windows-amd64.exe` — each on a matching runner building its own static
-  FFmpeg from the pinned commit (Windows cross-compiled from Linux with
-  mingw-w64) — then publishes one GitHub Release: a rolling `preview`
-  pre-release on `main` pushes, a versioned release on `v*` tags, plus a manual
-  `workflow_dispatch` trigger.
+  `mc-linux-amd64`, `mc-darwin-arm64` and `mc-windows-amd64.exe` — each on a
+  matching runner building its own static FFmpeg from the pinned commit (Windows
+  cross-compiled from Linux with mingw-w64 and fully statically linked via
+  `-extldflags=-static`, so the `.exe` has no `zlib1.dll` / libgcc dependency) —
+  then publishes one GitHub Release: a rolling `preview` pre-release on `main`
+  pushes, a versioned release on `v*` tags, plus a manual `workflow_dispatch`
+  trigger. Intel macOS is not built (build from source).
