@@ -51,8 +51,9 @@ setx PATH "$env:PATH;$env:LOCALAPPDATA\Programs\Media-Cli"    # restart the term
 ### Stay up to date
 
 ```bash
-mc update        # checks GitHub, asks, replaces the binary in place
-mc update -y     # no questions
+mc update            # checks GitHub, asks, replaces the binary in place
+mc update -y         # no questions
+mc update --preview  # take the newest preview (pre-release) build
 ```
 
 `mc update` finds the running binary wherever it is on your `PATH` (Windows keeps
@@ -211,13 +212,20 @@ mc info photo.jpg --format=json
 ### `mc update`
 
 ```
-mc update [-y]
+mc update [-y] [--preview]
 ```
 
 Update `mc` to the latest GitHub release; exits cleanly when already current.
 It replaces the running binary wherever it lives on your `PATH` (following
 symlinks). On Windows the current `mc.exe` is kept as `mc-<version>.exe`.
 See [Stay up to date](#stay-up-to-date).
+
+Only **stable** releases are used by default. If a newer **preview**
+(pre-release) is also published, `mc update` reports it: when there is no stable
+update to offer, it prompts to install the preview instead; when a stable update
+*is* offered, the preview is noted so you can re-run with `--preview`.
+`--preview` goes straight to the newest preview build. With `-y`, a preview is
+installed only when `--preview` is also given.
 
 ### `mc version`
 

@@ -89,11 +89,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `internal/query` (`--select` / `--sort-by` parser + evaluator),
   `internal/render` (TOON/JSON/CSV, ordered output). TOON output uses
   `github.com/toon-format/toon-go`.
-- **`mc update [-y]`**: checks GitHub releases for a newer version and replaces
-  the running binary in place — resolving the executable through symlinks so it
-  updates wherever `mc` sits on `PATH`. Unix does an atomic rename; Windows
-  renames the running `mc.exe` to `mc-<version>.exe` first. Skips the download
-  when already current; `-y` skips the prompt. Logic in `internal/selfupdate`.
+- **`mc update [-y] [--preview]`**: checks GitHub releases for a newer version
+  and replaces the running binary in place — resolving the executable through
+  symlinks so it updates wherever `mc` sits on `PATH`. Unix does an atomic
+  rename; Windows renames the running `mc.exe` to `mc-<version>.exe` first.
+  Skips the download when already current; `-y` skips the prompt. Logic in
+  `internal/selfupdate`.
+  - Considers stable releases by default. A newer preview (pre-release) is always
+    reported; when there is no stable update it is offered interactively, and
+    when a stable update is offered the preview is noted for a `--preview`
+    re-run. `--preview` targets the newest preview directly; with `-y` a preview
+    is only taken alongside `--preview`. Backed by `selfupdate.Releases` /
+    `selfupdate.LatestReleases` (all releases listed and ranked locally),
+    replacing the single `releases/latest` lookup.
 - **License compliance**: FFmpeg is LGPL-2.1-or-later and statically linked, so
   the repo carries `third_party/ffmpeg/COPYING.LGPLv2.1` / `COPYING.LGPLv3` /
   `LICENSE.md`, a root `THIRD-PARTY-NOTICES.md` (notice + corresponding-source

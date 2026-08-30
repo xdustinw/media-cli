@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,17 +63,70 @@ func TestApplyReplacesBinary(t *testing.T) {
 	}
 }
 
-func TestLatestReleaseParsing(t *testing.T) {
-	// LatestRelease targets the real GitHub host, so exercise the JSON shape
-	// the handler would return via the exported types instead.
-	payload := `{"tag_name":"v1.4.0","html_url":"h","assets":[
+func TestReleaseParsing(t *testing.T) {
+	// Exercise the JSON shape the GitHub API returns via the exported types.
+	payload := `{"tag_name":"v1.4.0","html_url":"h","prerelease":true,"assets":[
 		{"name":"mc-linux-amd64","browser_download_url":"u","size":10}]}`
 	var r Release
 	if err := json.Unmarshal([]byte(payload), &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.TagName != "v1.4.0" || len(r.Assets) != 1 || r.Assets[0].Size != 10 {
+	if r.TagName != "v1.4.0" || !r.Prerelease || len(r.Assets) != 1 || r.Assets[0].Size != 10 {
 		t.Fatalf("bad parse: %+v", r)
+	}
+}
+
+func TestLatestReleases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/releases") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `[
+			{"tag_name":"v0.3.0-rc1","prerelease":true,"assets":[]},
+			{"tag_name":"v0.3.0-rc2","prerelease":true,"assets":[]},
+			{"tag_name":"v0.5.0","draft":true,"prerelease":false,"assets":[]},
+			{"tag_name":"v0.2.0","prerelease":false,"assets":[]},
+			{"tag_name":"v0.1.0","prerelease":false,"assets":[]}
+		]`)
+	}))
+	defer srv.Close()
+
+	old := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = old }()
+
+	stable, preview, err := LatestReleases(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stable == nil || stable.TagName != "v0.2.0" {
+		t.Fatalf("stable = %v (drafts must be ignored, newest wins)", stable)
+	}
+	if preview == nil || preview.TagName != "v0.3.0-rc2" {
+		t.Fatalf("preview = %v", preview)
+	}
+}
+
+func TestLatestReleasesNoPreview(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `[{"tag_name":"v1.0.0","prerelease":false,"assets":[]}]`)
+	}))
+	defer srv.Close()
+	old := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = old }()
+
+	stable, preview, err := LatestReleases(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stable == nil || stable.TagName != "v1.0.0" {
+		t.Fatalf("stable = %v", stable)
+	}
+	if preview != nil {
+		t.Fatalf("preview = %v, want nil", preview)
 	}
 }
 

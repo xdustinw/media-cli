@@ -19,11 +19,17 @@ import (
 // Repo is the GitHub "owner/name" this CLI updates from.
 const Repo = "xdustinw/media-cli"
 
+// apiBase is the GitHub REST API root. It is a variable so tests can point the
+// release lookups at a local server.
+var apiBase = "https://api.github.com"
+
 // Release is the subset of the GitHub release payload we use.
 type Release struct {
-	TagName string  `json:"tag_name"`
-	HTMLURL string  `json:"html_url"`
-	Assets  []Asset `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	HTMLURL    string  `json:"html_url"`
+	Draft      bool    `json:"draft"`
+	Prerelease bool    `json:"prerelease"`
+	Assets     []Asset `json:"assets"`
 }
 
 // Asset is one uploaded release file.
@@ -54,10 +60,10 @@ func (r Release) FindAsset() *Asset {
 	return nil
 }
 
-// LatestRelease fetches the newest published (non-draft, non-prerelease)
-// release for Repo from the GitHub API.
-func LatestRelease(ctx context.Context) (*Release, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", Repo)
+// Releases fetches the most recent releases for Repo (newest first, as GitHub
+// orders them). Drafts are included as returned; callers filter them out.
+func Releases(ctx context.Context) ([]Release, error) {
+	url := fmt.Sprintf("%s/repos/%s/releases?per_page=30", apiBase, Repo)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -73,20 +79,39 @@ func LatestRelease(ctx context.Context) (*Release, error) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("no published release found for %s yet", Repo)
-	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
 	}
-	var rel Release
-	if err := json.Unmarshal(body, &rel); err != nil {
-		return nil, fmt.Errorf("parsing release response: %w", err)
+	var rels []Release
+	if err := json.Unmarshal(body, &rels); err != nil {
+		return nil, fmt.Errorf("parsing releases response: %w", err)
 	}
-	if rel.TagName == "" {
-		return nil, fmt.Errorf("no published release found for %s", Repo)
+	return rels, nil
+}
+
+// LatestReleases returns the newest stable release and the newest pre-release
+// for Repo. Either may be nil when none exists. Drafts and releases without a
+// usable tag are ignored; "newest" is by version order (see Compare).
+func LatestReleases(ctx context.Context) (stable, preview *Release, err error) {
+	rels, err := Releases(ctx)
+	if err != nil {
+		return nil, nil, err
 	}
-	return &rel, nil
+	for i := range rels {
+		r := rels[i]
+		if r.Draft || r.TagName == "" {
+			continue
+		}
+		slot := &stable
+		if r.Prerelease {
+			slot = &preview
+		}
+		if *slot == nil || Compare(NormalizeVersion(r.TagName), NormalizeVersion((*slot).TagName)) > 0 {
+			rr := r
+			*slot = &rr
+		}
+	}
+	return stable, preview, nil
 }
 
 // TargetPath returns the absolute path of the running executable with symlinks

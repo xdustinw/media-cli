@@ -64,7 +64,7 @@ func TestUpdateHelp(t *testing.T) {
 	if err := rootCmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("update --help: %v", err)
 	}
-	if !strings.Contains(out.String(), "GitHub release") && !strings.Contains(out.String(), "releases") {
+	if !strings.Contains(out.String(), "releases") || !strings.Contains(out.String(), "--preview") {
 		t.Fatalf("update help unexpected: %q", out.String())
 	}
 }
