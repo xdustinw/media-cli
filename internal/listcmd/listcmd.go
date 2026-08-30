@@ -9,9 +9,11 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/xdustinw/media-cli/internal/media"
 	"github.com/xdustinw/media-cli/internal/mediainfo"
@@ -21,12 +23,13 @@ import (
 
 // Options configures a Run.
 type Options struct {
-	Root    string
-	HashKey string   // freeform hash tag key shown as a default column ("mc.hash")
-	Meta    []string // extra metadata columns
-	SortBy  string
-	Select  string
-	Format  render.Format
+	Root      string
+	HashKey   string   // freeform hash tag key shown as a default column ("mc.hash")
+	Meta      []string // extra metadata columns
+	SortBy    string
+	Select    string
+	Format    render.Format
+	Recursive bool // descend into subdirectories
 
 	Stdout io.Writer
 	Stderr io.Writer
@@ -70,14 +73,16 @@ func Run(ctx context.Context, o Options) error {
 		sortKeys = []query.SortKey{{Field: "name"}}
 	}
 
-	paths, err := discover(ctx, o.Root)
+	paths, err := discover(ctx, o.Root, o.Recursive)
 	if err != nil {
 		return err
 	}
-	log.Info("listing", "root", o.Root, "candidates", len(paths))
+	log.Info("listing", "root", o.Root, "candidates", len(paths), "recursive", o.Recursive)
 
+	start := time.Now()
 	needDeep := selectorNeedsDeep(sel) || metaNeedsDeep(o.Meta)
 
+	var bytesProcessed int64
 	files := make([]*mediainfo.File, 0, len(paths))
 	for _, p := range paths {
 		if err := ctx.Err(); err != nil {
@@ -91,6 +96,7 @@ func Run(ctx context.Context, o Options) error {
 		}
 		if sel.Match(mf) {
 			files = append(files, mf)
+			bytesProcessed += mf.Size
 		}
 	}
 
@@ -100,6 +106,9 @@ func Run(ctx context.Context, o Options) error {
 	extra := dedupeMeta(o.Meta, o.hashKey())
 	columns := o.columns(extra)
 	absRoot, _ := filepath.Abs(o.Root)
+	defer func() {
+		fmt.Fprintln(o.Stderr, media.Summary(len(files), bytesProcessed, time.Since(start)))
+	}()
 
 	if o.Format == render.CSV {
 		tbl := render.Table{Columns: columns}
@@ -269,17 +278,36 @@ func dedupeMeta(meta []string, hashKey string) []string {
 	return out
 }
 
-func discover(ctx context.Context, root string) ([]string, error) {
+func discover(ctx context.Context, root string, recursive bool) ([]string, error) {
+	if info, err := os.Stat(root); err != nil {
+		return nil, err
+	} else if !info.IsDir() {
+		return []string{filepath.Clean(root)}, nil
+	}
+
 	var out []string
+	if !recursive {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if e.Type().IsRegular() {
+				out = append(out, filepath.Clean(filepath.Join(root, e.Name())))
+			}
+		}
+		return out, nil
+	}
+
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
-		}
-		if d.IsDir() {
-			return nil
 		}
 		if d.Type().IsRegular() {
 			out = append(out, filepath.Clean(p))

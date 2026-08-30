@@ -4,6 +4,7 @@ package infocmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"sort"
 	"time"
@@ -19,13 +20,20 @@ type Options struct {
 	Path   string
 	Format render.Format // toon or json
 	Stdout io.Writer
+	Stderr io.Writer
 }
 
 // Run inspects Options.Path and writes its full description.
 func Run(_ context.Context, o Options) error {
+	start := time.Now()
 	f, err := mediainfo.Load(o.Path, true)
 	if err != nil {
 		return err
+	}
+	if o.Stderr != nil {
+		defer func() {
+			fmt.Fprintln(o.Stderr, media.Summary(1, f.Size, time.Since(start)))
+		}()
 	}
 
 	doc := build(f)

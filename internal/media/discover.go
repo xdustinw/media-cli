@@ -5,11 +5,13 @@ package media
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrNoMediaFiles is returned by Discover when the target contains no files
@@ -20,16 +22,16 @@ var ErrNoMediaFiles = errors.New("no media files found")
 //
 //   - If target is a regular file it is returned as-is (extension is not
 //     enforced for an explicitly named file).
-//   - If target is a directory it is walked recursively and every file whose
-//     extension (case-insensitive) is in exts is returned.
+//   - If target is a directory, files whose extension (case-insensitive) is in
+//     exts are returned. When recursive is true subdirectories are descended
+//     into; otherwise only the directory's own files are considered.
 //
 // The walk stops early and returns ctx.Err() if ctx is cancelled.
-func Discover(ctx context.Context, target string, exts []string) ([]string, error) {
+func Discover(ctx context.Context, target string, exts []string, recursive bool) ([]string, error) {
 	info, err := os.Stat(target)
 	if err != nil {
 		return nil, err
 	}
-
 	if !info.IsDir() {
 		return []string{filepath.Clean(target)}, nil
 	}
@@ -40,28 +42,46 @@ func Discover(ctx context.Context, target string, exts []string) ([]string, erro
 	}
 
 	var out []string
-	walkErr := filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if d.IsDir() {
+	if recursive {
+		walkErr := filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if !d.IsDir() {
+				if _, ok := allow[strings.ToLower(filepath.Ext(path))]; ok {
+					out = append(out, filepath.Clean(path))
+				}
+			}
 			return nil
+		})
+		if walkErr != nil {
+			return nil, walkErr
 		}
-		if _, ok := allow[strings.ToLower(filepath.Ext(path))]; ok {
-			out = append(out, filepath.Clean(path))
+	} else {
+		entries, rerr := os.ReadDir(target)
+		if rerr != nil {
+			return nil, rerr
 		}
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
+		for _, e := range entries {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if e.IsDir() {
+				continue
+			}
+			p := filepath.Join(target, e.Name())
+			if _, ok := allow[strings.ToLower(filepath.Ext(p))]; ok {
+				out = append(out, filepath.Clean(p))
+			}
+		}
 	}
+
 	if len(out) == 0 {
 		return nil, ErrNoMediaFiles
 	}
-
 	sort.Strings(out)
 	return out, nil
 }
@@ -82,4 +102,25 @@ func DisplayBase(target string) string {
 		return filepath.Clean(target)
 	}
 	return filepath.Dir(filepath.Clean(target))
+}
+
+// Summary formats the per-command wrap-up line, e.g.
+// "processed 12 file(s) in 3.4s (28.1 MB/s)". Runs over a minute are shown as
+// "2m 5s" for readability. The rate is omitted when it cannot be computed.
+func Summary(files int, bytes int64, d time.Duration) string {
+	line := fmt.Sprintf("processed %d file(s) in %s", files, humanDuration(d))
+	if secs := d.Seconds(); secs > 0 && bytes > 0 {
+		line += fmt.Sprintf(" (%.1f MB/s)", float64(bytes)/(1024*1024)/secs)
+	}
+	return line
+}
+
+// humanDuration renders d as "2m 5s" once it reaches a minute, otherwise as a
+// sub-minute value rounded to the millisecond (e.g. "3.4s", "820ms").
+func humanDuration(d time.Duration) string {
+	if d < time.Minute {
+		return d.Round(time.Millisecond).String()
+	}
+	d = d.Round(time.Second)
+	return fmt.Sprintf("%dm %ds", d/time.Minute, (d%time.Minute)/time.Second)
 }

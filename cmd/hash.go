@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	flagAssumeYes bool
-	flagHashForce bool
+	flagAssumeYes     bool
+	flagHashForce     bool
+	flagHashRecursive bool
 )
 
 var hashCmd = &cobra.Command{
@@ -29,9 +30,10 @@ var hashCmd = &cobra.Command{
 
 Two files that differ only in metadata produce the same hash.
 
-Given a directory, matching files are processed recursively. As each file is
-processed a preview line is printed; then you confirm writing the tag
-'mc.hash=<hash>' and renaming each file to
+Given a directory, only that directory's own files are processed; pass
+-r/--recursive to descend into subdirectories. As each file is processed a
+preview line is printed; then you confirm writing the tag 'mc.hash=<hash>' and
+renaming each file to
 
     <name>.<first 6 of hash>.<ext>
 
@@ -53,6 +55,7 @@ it with the stored tag. Pass -y to skip the confirmation.`,
 			NameLength:  vip.GetInt(config.KeyHashNameLen),
 			AssumeYes:   vip.GetBool(config.KeyAssumeYes),
 			Force:       flagHashForce,
+			Recursive:   flagHashRecursive,
 			Stdout:      cmd.OutOrStdout(),
 			Stderr:      cmd.ErrOrStderr(),
 			Confirm: func(prompt string) (bool, error) {
@@ -72,6 +75,7 @@ it with the stored tag. Pass -y to skip the confirmation.`,
 func init() {
 	hashCmd.Flags().BoolVarP(&flagAssumeYes, "yes", "y", false, "skip confirmation and apply changes")
 	hashCmd.Flags().BoolVarP(&flagHashForce, "force", "f", false, "re-hash files that already have an mc.hash tag")
+	hashCmd.Flags().BoolVarP(&flagHashRecursive, "recursive", "r", false, "descend into subdirectories")
 	_ = vip.BindPFlag(config.KeyAssumeYes, hashCmd.Flags().Lookup("yes"))
 	rootCmd.AddCommand(hashCmd)
 }

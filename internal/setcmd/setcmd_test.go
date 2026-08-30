@@ -55,7 +55,7 @@ func TestSetSelectedFiles(t *testing.T) {
 	tags, _ := tag.Parse("rating=3,author=Adam")
 	out, _ := run(t, Options{
 		Target: root, Tags: tags, Select: "name=3*Adam*",
-		Extensions: []string{".png"}, AssumeYes: true,
+		Extensions: []string{".png"}, AssumeYes: true, Recursive: true,
 	})
 	if !strings.Contains(out, "on 2 file(s)") {
 		t.Fatalf("expected 2 targets:\n%s", out)

@@ -69,7 +69,7 @@ func run(t *testing.T, o Options) string {
 
 func TestListBasic(t *testing.T) {
 	root := fixtures(t)
-	got := run(t, Options{Root: root, Format: render.TOON})
+	got := run(t, Options{Root: root, Format: render.TOON, Recursive: true})
 	base := filepath.Base(root)
 	for _, want := range []string{
 		"3 file(s)",
@@ -88,6 +88,30 @@ func TestListBasic(t *testing.T) {
 	}
 	if strings.Contains(got, "- filename:") {
 		t.Fatalf("rows should be flat, not one attribute per line:\n%s", got)
+	}
+}
+
+func TestListNonRecursiveByDefault(t *testing.T) {
+	root := fixtures(t)
+	got := run(t, Options{Root: root, Format: render.TOON})
+	if !strings.Contains(got, "2 file(s)") { // big.png, notes.txt — sub/ skipped
+		t.Fatalf("expected only the 2 top-level files:\n%s", got)
+	}
+	if strings.Contains(got, "small.jpg") || strings.Contains(got, `"sub/":`) {
+		t.Fatalf("non-recursive listing must not descend into sub/:\n%s", got)
+	}
+}
+
+func TestListSummaryOnStderr(t *testing.T) {
+	root := fixtures(t)
+	var out, errb bytes.Buffer
+	if err := Run(context.Background(), Options{
+		Root: root, Format: render.TOON, Stdout: &out, Stderr: &errb,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errb.String(), "processed 2 file(s) in ") {
+		t.Fatalf("missing summary line on stderr: %q", errb.String())
 	}
 }
 
@@ -110,10 +134,11 @@ func TestListImageHashColumn(t *testing.T) {
 func TestListSelectAndSort(t *testing.T) {
 	root := fixtures(t)
 	got := run(t, Options{
-		Root:   root,
-		Select: "kind=image and size>2k",
-		SortBy: "size desc",
-		Format: render.CSV,
+		Root:      root,
+		Select:    "kind=image and size>2k",
+		SortBy:    "size desc",
+		Format:    render.CSV,
+		Recursive: true,
 	})
 	lines := strings.Split(strings.TrimSpace(got), "\n")
 	if len(lines) != 2 { // header + big.png only (small.jpg is tiny, notes.txt not image)
@@ -126,7 +151,7 @@ func TestListSelectAndSort(t *testing.T) {
 
 func TestListJSONHierarchy(t *testing.T) {
 	root := fixtures(t)
-	got := run(t, Options{Root: root, Format: render.JSON, Meta: []string{"format"}})
+	got := run(t, Options{Root: root, Format: render.JSON, Meta: []string{"format"}, Recursive: true})
 
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(got), &doc); err != nil {

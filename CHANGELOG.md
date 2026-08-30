@@ -17,10 +17,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in; `scripts/build-ffmpeg.sh` builds any target (host or cross), fetching the
   pinned FFmpeg source when `../ref/ffmpeg` is absent. Audio/video use stream
   copy; a curated set of still-image decoders is enabled for image hashing.
-- **`mc hash [file|folder] [-y] [-f]`**: computes a metadata-independent MD5 for
-  each video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe
-  .jfif .png .apng .gif .webp`) file, recursively for folders. The target
-  defaults to the current directory.
+- **`mc hash [file|folder] [-y] [-f] [-r]`**: computes a metadata-independent MD5
+  for each video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe
+  .jfif .png .apng .gif .webp`) file. Given a folder, only its own files are
+  processed unless `-r` / `--recursive` is passed. The target defaults to the
+  current directory.
   - Video: hash of the encoded video+audio streams, ignoring container metadata
     (equivalent to `ffmpeg -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`) —
     pure stream copy, never decoded. Parsers (`AVFMT_FLAG_NOPARSE`), the
@@ -46,8 +47,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     stored tag, flagging any mismatch.
   - The per-file preview (hash + planned name, `+`/`»`/`~`/`=` glyph) is printed
     as each file is processed, so progress shows on large folders.
-- **`mc list [folder] [flags]`**: recursive listing (folder defaults to the
-  current directory). Each file row is
+- **`mc list [folder] [flags]`**: folder listing (folder defaults to the current
+  directory; only its own files unless `-r` / `--recursive` is passed). Each file
+  row is
   `filename`, `size` (human readable), `mc.hash`, `rating`, `authors`, `tags`.
   `mc.hash` is read from container metadata (video) or the imgmeta record
   (images).
@@ -60,9 +62,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     or any metadata key, operators `= != > < >= <=` (`=` does a case-insensitive
     `*`/`?` wildcard match, OS-independent), size suffixes `k/m/g/t`, `and`/`or`.
   - `--sort-by='rating desc, size desc, name'` — multi-key, optional `desc`.
-- **`mc set '<key=value,...>' [folder] [--select=<expr>] [-y]`**: writes chosen
-  metadata onto the media files in a folder (recursively; folder defaults to the
-  current directory) that match `--select`.
+- **`mc set '<key=value,...>' [folder] [--select=<expr>] [-y] [-r]`**: writes
+  chosen metadata onto the media files in a folder (its own files only unless
+  `-r` / `--recursive` is passed; folder defaults to the current directory) that
+  match `--select`.
   Video is remuxed with stream copy (pixels/streams and the `mc.hash` value
   unchanged, only container metadata rewritten); image tags go into the same
   native text store `mc.hash` uses (and shares the video remux's parser/probe
@@ -75,6 +78,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail
   blobs dropped); and an `mc_metadata` section listing the file's imgmeta tags.
+- **Processing summary**: `mc hash`, `mc list`, `mc set` and `mc info` each print
+  a one-line wrap-up to stderr when they finish —
+  `processed <n> file(s) in <duration> (<rate> MB/s)` (the rate is omitted when
+  it cannot be computed; runs over a minute are shown as `2m 5s`). Shared
+  `media.Summary` helper.
 - **`internal/ffmpeg.Inspect`** (cgo `mc_probe`): container + stream + metadata
   probe, optionally decoding the first frame for image EXIF. New support
   packages: `internal/mediainfo` (derives rating/authors/tags, size formatting),

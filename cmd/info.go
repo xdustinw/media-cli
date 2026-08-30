@@ -27,6 +27,7 @@ and all embedded metadata (including image EXIF / PNG text).
 			Path:   args[0],
 			Format: format,
 			Stdout: cmd.OutOrStdout(),
+			Stderr: cmd.ErrOrStderr(),
 		})
 	},
 }

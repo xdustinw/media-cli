@@ -11,16 +11,18 @@ import (
 )
 
 var (
-	flagListMeta   string
-	flagListSortBy string
-	flagListSelect string
-	flagListFormat string
+	flagListMeta      string
+	flagListSortBy    string
+	flagListSelect    string
+	flagListFormat    string
+	flagListRecursive bool
 )
 
 var listCmd = &cobra.Command{
 	Use:   "list [folder]",
 	Short: "List media files in a folder with size and metadata",
-	Long: `list walks <folder> (default: current directory) recursively. Each file
+	Long: `list scans <folder> (default: current directory). Only that folder's own
+files are listed; pass -r/--recursive to descend into subdirectories. Each file
 row is: filename, size, mc.hash, rating, authors, tags.
 toon/json nest the rows under their folders; csv is one flat table (absolute paths).
 
@@ -41,14 +43,15 @@ toon/json nest the rows under their folders; csv is one flat table (absolute pat
 			return err
 		}
 		return listcmd.Run(cmd.Context(), listcmd.Options{
-			Root:    argOr(args, 0, "."),
-			HashKey: vip.GetString(config.KeyHashMetaKey),
-			Meta:    splitCSVFlag(flagListMeta),
-			SortBy:  flagListSortBy,
-			Select:  flagListSelect,
-			Format:  format,
-			Stdout:  cmd.OutOrStdout(),
-			Stderr:  cmd.ErrOrStderr(),
+			Root:      argOr(args, 0, "."),
+			HashKey:   vip.GetString(config.KeyHashMetaKey),
+			Meta:      splitCSVFlag(flagListMeta),
+			SortBy:    flagListSortBy,
+			Select:    flagListSelect,
+			Format:    format,
+			Recursive: flagListRecursive,
+			Stdout:    cmd.OutOrStdout(),
+			Stderr:    cmd.ErrOrStderr(),
 		})
 	},
 }
@@ -69,5 +72,6 @@ func init() {
 	f.StringVar(&flagListSortBy, "sort-by", "", "sort keys, e.g. 'rating desc, size desc'")
 	f.StringVar(&flagListSelect, "select", "", "filter expression")
 	f.StringVar(&flagListFormat, "format", "toon", "output format: toon, json, csv")
+	f.BoolVarP(&flagListRecursive, "recursive", "r", false, "descend into subdirectories")
 	rootCmd.AddCommand(listCmd)
 }

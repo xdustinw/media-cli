@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/xdustinw/media-cli/internal/ffmpeg"
 	"github.com/xdustinw/media-cli/internal/imgmeta"
@@ -25,6 +26,7 @@ type Options struct {
 	Select     string
 	Extensions []string
 	AssumeYes  bool
+	Recursive  bool
 
 	Stdout  io.Writer
 	Stderr  io.Writer
@@ -48,12 +50,13 @@ func Run(ctx context.Context, o Options) error {
 		return fmt.Errorf("--select: %w", err)
 	}
 
-	files, err := media.Discover(ctx, o.Target, o.Extensions)
+	files, err := media.Discover(ctx, o.Target, o.Extensions, o.Recursive)
 	if err != nil {
 		return err
 	}
 	base := media.DisplayBase(o.Target)
 	log.Info("scanning", "target", o.Target, "files", len(files), "select", o.Select)
+	start := time.Now()
 
 	// Probe cheaply while filtering; only pay for a deep probe when --select
 	// actually references a field that needs one (image EXIF etc.).
@@ -85,9 +88,17 @@ func Run(ctx context.Context, o Options) error {
 		targets = append(targets, mf)
 	}
 
+	scanElapsed := time.Since(start)
+
 	if len(targets) == 0 {
 		fmt.Fprintf(o.Stdout, "No files match; nothing to set.\n")
+		fmt.Fprintln(o.Stderr, media.Summary(len(files), 0, scanElapsed))
 		return summaryErr(scanErrs)
+	}
+
+	var bytesProcessed int64
+	for _, f := range targets {
+		bytesProcessed += f.Size
 	}
 
 	// Preview: per file, "key: <current> -> <new>" for each tag.
@@ -115,10 +126,12 @@ func Run(ctx context.Context, o Options) error {
 		}
 		if !ok {
 			fmt.Fprintln(o.Stdout, "Aborted; no files changed.")
+			fmt.Fprintln(o.Stderr, media.Summary(len(targets), bytesProcessed, scanElapsed))
 			return summaryErr(scanErrs)
 		}
 	}
 
+	applyStart := time.Now()
 	var applyErrs int
 	for _, f := range targets {
 		if err := ctx.Err(); err != nil {
@@ -132,6 +145,8 @@ func Run(ctx context.Context, o Options) error {
 		log.Info("set", "file", f.Abs, "tags", o.Tags.String())
 		fmt.Fprintf(o.Stdout, "  ✓ %s\n", media.RelTo(base, f.Path))
 	}
+
+	fmt.Fprintln(o.Stderr, media.Summary(len(targets), bytesProcessed, scanElapsed+time.Since(applyStart)))
 
 	if applyErrs > 0 {
 		return fmt.Errorf("%d file(s) failed to update", applyErrs)

@@ -61,6 +61,7 @@ func TestRunTagsRenamesAndIsIdempotent(t *testing.T) {
 		MetadataKey: "mc.hash",
 		NameLength:  6,
 		AssumeYes:   true,
+		Recursive:   true,
 		Stdout:      &out,
 		Stderr:      &errb,
 		Logger:      quietLogger(),

@@ -74,15 +74,17 @@ Global flags: `-v/--verbose`, `--debug`, `--config <path>`.
 ### `mc hash`
 
 ```
-mc hash [file or folder] [-y] [-f]      # target defaults to the current directory
+mc hash [file or folder] [-y] [-f] [-r]   # target defaults to the current directory
 ```
 
-Hash media by content, then write the hash into the file and rename it.
+Hash media by content, then write the hash into the file and rename it. Given a
+folder, only its own files are processed; pass `-r` / `--recursive` to descend
+into subfolders.
 
 ```bash
 mc hash                       # hash the current directory
 mc hash movie.mp4             # hash one file, confirm changes
-mc hash ~/Videos             # recurse a folder
+mc hash -r ~/Videos           # include subfolders
 mc hash ~/Photos -y          # no confirmation prompt
 mc hash ~/Photos -f          # re-hash even files that already have mc.hash
 ```
@@ -119,18 +121,20 @@ and the tag rewritten.
 ### `mc list`
 
 ```
-mc list [folder] [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--format=toon|json|csv]
+mc list [folder] [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--format=toon|json|csv] [-r]
 ```
 
-Walks `[folder]` (default: current directory) recursively. Each file row is `filename`, `size`, `mc.hash`,
-`rating`, `authors`, `tags` (+ any `--meta` columns). `toon` and `json` nest the
-rows under their folders; `csv` is one flat table with absolute paths.
+Lists `[folder]` (default: current directory). Only that folder's own files are
+listed; pass `-r` / `--recursive` to descend into subfolders. Each file row is
+`filename`, `size`, `mc.hash`, `rating`, `authors`, `tags` (+ any `--meta`
+columns). `toon` and `json` nest the rows under their folders; `csv` is one flat
+table with absolute paths.
 
 ```bash
 mc list ~/Photos
-mc list ~/Photos --meta=make,model,DateTimeOriginal
-mc list ~/Videos --select='rating>=4 and size>1g' --sort-by='rating desc, size desc'
-mc list ~/Photos --format=csv > inventory.csv          # flat, absolute paths
+mc list -r ~/Photos --meta=make,model,DateTimeOriginal
+mc list -r ~/Videos --select='rating>=4 and size>1g' --sort-by='rating desc, size desc'
+mc list -r ~/Photos --format=csv > inventory.csv       # flat, absolute paths
 ```
 
 ```
@@ -154,18 +158,25 @@ $ mc list tmp
 - `--sort-by` – comma-separated keys, each optionally `desc` (default `name`);
   folders are always alphabetical.
 - `--format` – `toon` (default), `json`, or `csv`.
+- `-r` / `--recursive` – descend into subfolders (off by default).
+
+Every command that walks files (`hash`, `list`, `set`, `info`) prints a one-line
+summary to stderr when it finishes, e.g.
+`processed 12 file(s) in 3.4s (28.1 MB/s)` (runs over a minute read as
+`2m 5s`).
 
 ### `mc set`
 
 ```
-mc set '<key=value,...>' [folder] [--select=<expr>] [-y]
+mc set '<key=value,...>' [folder] [--select=<expr>] [-y] [-r]
 ```
 
-Writes metadata onto the media files (recursively) in `[folder]` — default the
-current directory — that match `--select`.
+Writes metadata onto the media files in `[folder]` — default the current
+directory — that match `--select`. Only that folder's own files are considered;
+pass `-r` / `--recursive` to descend into subfolders.
 
 ```bash
-mc set 'rating=3,author=Adam' ~/Photos --select='name=3*Adam*'
+mc set 'rating=3,author=Adam' -r ~/Photos --select='name=3*Adam*'
 mc set 'title=Trip 2026' ~/Videos --select='name=DSC*' -y
 mc set 'author="Doe, Jane"' ~/Photos --select='author=old-name'   # quote to keep a comma
 ```
@@ -180,6 +191,7 @@ mc set 'author="Doe, Jane"' ~/Photos --select='author=old-name'   # quote to kee
   without it every media file in the folder is updated.
 - The change is previewed (`key: <current> -> <new>` per file) and confirmed
   unless `-y`.
+- `-r` / `--recursive` – descend into subfolders (off by default).
 
 ### `mc info`
 

@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/xdustinw/media-cli/internal/ffmpeg"
 	"github.com/xdustinw/media-cli/internal/imgmeta"
@@ -34,6 +35,7 @@ type Options struct {
 	NameLength  int    // hash prefix length used in the renamed filename
 	AssumeYes   bool   // skip the confirmation prompt
 	Force       bool   // re-hash files that already carry the tag (and compare)
+	Recursive   bool   // descend into subdirectories
 
 	Stdout  io.Writer
 	Stderr  io.Writer
@@ -77,16 +79,18 @@ func Run(ctx context.Context, o Options) error {
 		o.MetadataKey = "mc.hash"
 	}
 
-	files, err := media.Discover(ctx, o.Target, o.Extensions)
+	files, err := media.Discover(ctx, o.Target, o.Extensions, o.Recursive)
 	if err != nil {
 		return err
 	}
 	base := media.DisplayBase(o.Target)
-	log.Info("scanning", "target", o.Target, "files", len(files))
+	log.Info("scanning", "target", o.Target, "files", len(files), "recursive", o.Recursive)
 
 	// Preview each file the moment it is hashed, so progress is visible.
 	fmt.Fprintf(o.Stdout, "Preview (%s):\n", o.MetadataKey)
 
+	start := time.Now()
+	var bytesProcessed int64
 	items := make([]item, 0, len(files))
 	var scanErrs int
 	for _, f := range files {
@@ -140,9 +144,14 @@ func Run(ctx context.Context, o Options) error {
 		}
 		classify(o.MetadataKey, &it)
 		items = append(items, it)
+		if st, serr := os.Stat(f); serr == nil {
+			bytesProcessed += st.Size()
+		}
 
 		fmt.Fprintln(o.Stdout, previewLine(base, o.MetadataKey, it))
 	}
+
+	elapsed := time.Since(start)
 
 	if len(items) == 0 {
 		return fmt.Errorf("no files could be hashed (%d error(s))", scanErrs)
@@ -159,6 +168,7 @@ func Run(ctx context.Context, o Options) error {
 
 	if len(pending) == 0 {
 		fmt.Fprintln(o.Stdout, "Nothing to do.")
+		fmt.Fprintln(o.Stderr, media.Summary(len(items), bytesProcessed, elapsed))
 		return summaryErr(scanErrs)
 	}
 
@@ -174,11 +184,13 @@ func Run(ctx context.Context, o Options) error {
 		}
 		if !ok {
 			fmt.Fprintln(o.Stdout, "Aborted; no files changed.")
+			fmt.Fprintln(o.Stderr, media.Summary(len(items), bytesProcessed, elapsed))
 			return summaryErr(scanErrs)
 		}
 	}
 
 	// Apply.
+	applyStart := time.Now()
 	var applyErrs int
 	for _, it := range pending {
 		if err := ctx.Err(); err != nil {
@@ -192,6 +204,8 @@ func Run(ctx context.Context, o Options) error {
 		log.Info("tagged", "file", it.newPath, "hash", it.hash)
 		fmt.Fprintf(o.Stdout, "  ✓ %s  ->  %s\n", it.rel, media.RelTo(base, it.newPath))
 	}
+
+	fmt.Fprintln(o.Stderr, media.Summary(len(items), bytesProcessed, elapsed+time.Since(applyStart)))
 
 	if applyErrs > 0 {
 		return fmt.Errorf("%d file(s) failed to update", applyErrs)
