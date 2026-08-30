@@ -86,6 +86,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs it. Previews `key: <current> -> <new>` per file and confirms unless
   `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
   `ffmpeg.WriteTags` / `imgmeta.WriteMany` / `imgmeta.ReadAll` added.
+- **`mc copy <source> <target> [-m <mode>] [-y]`** and **`mc move …`**: bring
+  every file from a source (file or folder) into a target folder, recursively,
+  each file landing at `<target>/<path relative to source>`. `move` removes a
+  source file once its target is written. Before writing, each source file's
+  `.<6-hex>` short hash (from `mc hash`, name-based — no metadata read) is
+  matched against the short hashes of files already anywhere under the target;
+  every match is a duplicate resolved as `overwrite` (copy source bytes over the
+  target file, keeping its path), `skip-duplicate` (leave both), or `rename`
+  (rename the target file to the source's name in place). `-m` / `--mode`
+  applies one choice to all duplicates; without it each is prompted. `-y` skips
+  the final confirm and defaults duplicates to `overwrite`. Non-duplicate path
+  collisions are skipped, never overwritten. The plan is shown as a TOON preview
+  first. New packages `internal/copycmd`, `media.CopyFile` / `media.MoveFile` /
+  `media.WalkFiles`.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
   modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail

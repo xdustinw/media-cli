@@ -66,6 +66,7 @@ the old `mc.exe` as `mc-<version>.exe`).
 | [`mc hash`](#mc-hash) | Fingerprint media by content and rename each file (optionally tag it) |
 | [`mc list`](#mc-list) | List a folder's media with size and metadata, filter & sort |
 | [`mc set`](#mc-set) | Write chosen metadata onto matching files in a folder |
+| [`mc copy`](#mc-copy--mc-move) / [`mc move`](#mc-copy--mc-move) | Bring files into a folder, resolving name-hash duplicates |
 | [`mc info`](#mc-info) | Dump everything known about one file |
 | [`mc update`](#mc-update) | Update `mc` to the latest release |
 | [`mc version`](#mc-version) | Print version and bundled-FFmpeg info |
@@ -201,6 +202,40 @@ mc set 'artist="Doe, Jane"' ~/Photos --select='artist=old-name'   # quote to kee
 - The change is previewed (`key: <current> -> <new>` per file) and confirmed
   unless `-y`.
 - `-r` / `--recursive` – descend into subfolders (off by default).
+
+### `mc copy` / `mc move`
+
+```
+mc copy <source> <target> [-m <mode>] [-y]
+mc move <source> <target> [-m <mode>] [-y]
+```
+
+Bring every file from `<source>` (a file or folder) into `<target>`,
+recursively — each file lands at `<target>/<path relative to source>`. `move`
+removes a source file once its target is written; `copy` leaves it.
+
+Before writing anything, each source file's `.<6-hex>` short hash (from
+[`mc hash`](#mc-hash)) is looked up among the short hashes of the files
+**already anywhere under `<target>`**. Each match is a *duplicate* and you decide
+what to do with it:
+
+| choice | effect |
+| --- | --- |
+| `o` / `overwrite` | copy the source bytes over the matching target file (it keeps its folder **and** name) |
+| `s` / `skip-duplicate` | leave the target; don't bring the source in (`move` leaves the source too) |
+| `r` / `rename` | rename the matching target file to the source's name (folder unchanged); bytes untouched |
+
+```bash
+mc copy ~/incoming ~/library                 # ask per duplicate
+mc move ~/incoming ~/library -m rename        # one choice for all duplicates
+mc move ~/incoming ~/library -y               # no prompts; duplicates -> overwrite
+```
+
+`-m` / `--mode` applies one choice to every duplicate; without it you're asked
+per file. `-y` skips the final confirmation and makes duplicates default to
+`overwrite`. A source file whose destination path is already taken by a
+*non-duplicate* is skipped (never overwritten). The full plan is shown as a TOON
+preview before anything happens.
 
 ### `mc info`
 

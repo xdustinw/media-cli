@@ -86,6 +86,43 @@ func Discover(ctx context.Context, target string, exts []string, recursive bool)
 	return out, nil
 }
 
+// WalkFiles returns every regular file under root, recursively and sorted. When
+// root is a single file it returns just that file. The tool's own temp files
+// (".mc-*") are skipped. Unlike Discover it does not filter by extension.
+func WalkFiles(ctx context.Context, root string) ([]string, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []string{filepath.Clean(root)}, nil
+	}
+	var out []string
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if strings.HasPrefix(d.Name(), ".mc-") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Type().IsRegular() {
+			out = append(out, filepath.Clean(path))
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // RelTo returns path relative to base, falling back to path on failure. Used for
 // display only.
 func RelTo(base, path string) string {

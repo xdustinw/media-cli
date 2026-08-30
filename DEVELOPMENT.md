@@ -199,15 +199,16 @@ no GPL/nonfree parts. Compliance is handled by:
 | `cmd/` | Cobra commands — thin: parsing, wiring, error presentation |
 | `internal/ffmpeg/` | cgo bridge: stream & pixel hashing, tag remux, `Inspect` probe |
 | `internal/imgmeta/` | pixel-preserving image metadata read/write/enumerate (PNG/JPEG/GIF/WebP) |
-| `internal/hashcmd/`, `internal/setcmd/` | `mc hash` / `mc set` workflows |
+| `internal/hashcmd/`, `internal/setcmd/` | `mc hash` (see `method.go`) / `mc set` workflows |
 | `internal/listcmd/`, `internal/infocmd/` | `mc list` / `mc info` workflows |
+| `internal/copycmd/` | `mc copy` / `mc move`: name-hash duplicate resolution |
 | `internal/mediainfo/` | filesystem + probe + imgmeta → one record; rating/authors/tags derivation |
 | `internal/query/` | `--select` / `--sort-by` parser and evaluator |
 | `internal/tag/` | `mc set` `key=value,…` parser |
 | `internal/render/` | TOON / JSON / CSV output, order-preserving |
 | `internal/selfupdate/` | `mc update`: release lookup + in-place binary replacement |
-| `internal/media/` | file discovery, video/image classification, safe rename |
-| `internal/toon/` | small TOON encoder for the `mc update` preview |
+| `internal/media/` | file discovery/walk, video/image classification, safe rename, copy/move |
+| `internal/toon/` | small TOON encoder for the `mc update` / `mc copy` previews |
 | `internal/config/`, `internal/logging/` | Viper / slog setup |
 | `scripts/build-ffmpeg.sh` | vendored FFmpeg builder |
 | `third_party/ffmpeg/<goos>_<goarch>/` | static FFmpeg libs + headers (only `linux_amd64` committed) |

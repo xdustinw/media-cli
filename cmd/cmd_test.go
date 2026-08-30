@@ -41,6 +41,8 @@ func TestListInfoHelp(t *testing.T) {
 		{"list", "--select"},
 		{"info", "EXIF"},
 		{"set", "key=value"},
+		{"copy", "duplicate"},
+		{"move", "duplicate"},
 	} {
 		var out bytes.Buffer
 		rootCmd.SetOut(&out)
