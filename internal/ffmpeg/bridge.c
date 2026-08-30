@@ -380,9 +380,9 @@ static int muxer_is_mov(const AVOutputFormat *ofmt) {
            strstr(ofmt->name, "ipod") || strstr(ofmt->name, "3gp");
 }
 
-int mc_write_tag(const char *infile, const char *outfile,
-                 const char *key, const char *value,
-                 char *errbuf, size_t errbuf_size) {
+int mc_write_tags(const char *infile, const char *outfile,
+                  const char *const *keys, const char *const *values, int n,
+                  char *errbuf, size_t errbuf_size) {
     AVFormatContext *ic = NULL;
     AVFormatContext *oc = NULL;
     AVPacket *pkt = NULL;
@@ -435,9 +435,11 @@ int mc_write_tag(const char *infile, const char *outfile,
     }
 
     av_dict_copy(&oc->metadata, ic->metadata, 0);
-    ret = av_dict_set(&oc->metadata, key, value, 0);
-    if (ret < 0) {
-        goto done;
+    for (int k = 0; k < n; k++) {
+        ret = av_dict_set(&oc->metadata, keys[k], values[k], 0);
+        if (ret < 0) {
+            goto done;
+        }
     }
     ret = 0;
 

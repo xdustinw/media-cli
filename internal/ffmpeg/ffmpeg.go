@@ -120,24 +120,44 @@ func ImageHash(path string) (string, error) {
 }
 
 // WriteTag remuxes src to dst (stream copy, all streams and metadata preserved)
-// and sets the freeform global tag key=value. dst must not already exist and
-// its extension selects the container. Equivalent to
-// `ffmpeg -i <src> -map 0 -c copy -map_metadata 0 -metadata key=value <dst>`
-// (with -movflags use_metadata_tags for MP4/MOV).
+// and sets the freeform global tag key=value.
 func WriteTag(src, dst, key, value string) error {
+	return WriteTags(src, dst, []string{key}, []string{value})
+}
+
+// WriteTags is WriteTag for several keys at once (one remux). keys and values
+// are parallel slices. dst must not already exist and its extension selects the
+// container. Equivalent to `ffmpeg -i <src> -map 0 -c copy -map_metadata 0
+// -metadata k1=v1 -metadata k2=v2 <dst>` (with -movflags use_metadata_tags for
+// MP4/MOV).
+func WriteTags(src, dst string, keys, values []string) error {
+	if len(keys) != len(values) {
+		return fmt.Errorf("write tags %s: %d keys but %d values", src, len(keys), len(values))
+	}
 	cSrc := C.CString(src)
 	cDst := C.CString(dst)
-	cKey := C.CString(key)
-	cVal := C.CString(value)
 	defer C.free(unsafe.Pointer(cSrc))
 	defer C.free(unsafe.Pointer(cDst))
-	defer C.free(unsafe.Pointer(cKey))
-	defer C.free(unsafe.Pointer(cVal))
+
+	ck := make([]*C.char, len(keys)+1) // +1 keeps &ck[0] valid when empty
+	cv := make([]*C.char, len(values)+1)
+	for i := range keys {
+		ck[i] = C.CString(keys[i])
+		cv[i] = C.CString(values[i])
+	}
+	defer func() {
+		for i := range keys {
+			C.free(unsafe.Pointer(ck[i]))
+			C.free(unsafe.Pointer(cv[i]))
+		}
+	}()
 
 	errbuf := make([]C.char, errBufLen)
-	rc := C.mc_write_tag(cSrc, cDst, cKey, cVal, &errbuf[0], C.size_t(len(errbuf)))
+	rc := C.mc_write_tags(cSrc, cDst,
+		(**C.char)(unsafe.Pointer(&ck[0])), (**C.char)(unsafe.Pointer(&cv[0])),
+		C.int(len(keys)), &errbuf[0], C.size_t(len(errbuf)))
 	if rc < 0 {
-		return avError("write tag "+src, rc, &errbuf[0])
+		return avError("write tags "+src, rc, &errbuf[0])
 	}
 	return nil
 }

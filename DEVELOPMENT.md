@@ -170,11 +170,12 @@ no GPL/nonfree parts. Compliance is handled by:
 | --- | --- |
 | `cmd/` | Cobra commands — thin: parsing, wiring, error presentation |
 | `internal/ffmpeg/` | cgo bridge: stream & pixel hashing, tag remux, `Inspect` probe |
-| `internal/imgmeta/` | pixel-preserving image metadata read/write (PNG/JPEG/GIF/WebP) |
-| `internal/hashcmd/` | `mc hash` workflow |
+| `internal/imgmeta/` | pixel-preserving image metadata read/write/enumerate (PNG/JPEG/GIF/WebP) |
+| `internal/hashcmd/`, `internal/setcmd/` | `mc hash` / `mc set` workflows |
 | `internal/listcmd/`, `internal/infocmd/` | `mc list` / `mc info` workflows |
-| `internal/mediainfo/` | filesystem + probe → one record; rating/authors/tags derivation |
+| `internal/mediainfo/` | filesystem + probe + imgmeta → one record; rating/authors/tags derivation |
 | `internal/query/` | `--select` / `--sort-by` parser and evaluator |
+| `internal/tag/` | `mc set` `key=value,…` parser |
 | `internal/render/` | TOON / JSON / CSV output, order-preserving |
 | `internal/selfupdate/` | `mc update`: release lookup + in-place binary replacement |
 | `internal/media/` | file discovery, video/image classification, safe rename |

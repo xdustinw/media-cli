@@ -28,9 +28,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     (`Invalid NAL unit size`, `missing picture in access unit`, …) is silenced
     by default — it does not affect the hash and the CLI reports real failures
     itself. `-v` / `--debug` brings the FFmpeg log back.
-  - Prints `<hash> - <path>`, shows a TOON preview, then on confirmation (or
-    `-y`) writes the freeform tag `mc.hash=<hash>` and renames each file to
-    `<name>.<first 6 of hash>.<ext>`.
+  - Prints `<hash> - <path>`, shows a preview, then on confirmation (or `-y`)
+    writes the freeform tag `mc.hash=<hash>` and renames each file to
+    `<name>.<first 6 of hash>.<ext>`. If the name already ends with a
+    `.<6-hex>` slot, it is replaced rather than a second one appended.
   - Tag writes never alter pixels or streams: video is remuxed with stream copy;
     images get a native text record (PNG `tEXt`, JPEG `COM`, GIF comment, WebP
     `mcTG` chunk) added via `internal/imgmeta`.
@@ -54,10 +55,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     or any metadata key, operators `= != > < >= <=` (globs on `=`), size
     suffixes `k/m/g/t`, `and`/`or`.
   - `--sort-by='rating desc, size desc, name'` — multi-key, optional `desc`.
+- **`mc set '<key=value,...>' <folder> [--select=<expr>] [-y]`**: writes chosen
+  metadata onto the media files in a folder (recursively) that match `--select`.
+  Video is remuxed with stream copy (pixels/streams and the `mc.hash` value
+  unchanged, only container metadata rewritten); image tags go into the same
+  native text store `mc.hash` uses. Values may contain spaces; a `"…"` wrap
+  keeps a comma inside a value. Previews `key: <current> -> <new>` per file and
+  confirms unless `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
+  `ffmpeg.WriteTags` / `imgmeta.WriteMany` / `imgmeta.ReadAll` added.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
-  modified time; container/codec details per stream; and every metadata entry
+  modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail
-  blobs dropped).
+  blobs dropped); and an `mc_metadata` section listing the file's imgmeta tags.
 - **`internal/ffmpeg.Inspect`** (cgo `mc_probe`): container + stream + metadata
   probe, optionally decoding the first frame for image EXIF. New support
   packages: `internal/mediainfo` (derives rating/authors/tags, size formatting),

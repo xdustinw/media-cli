@@ -27,18 +27,18 @@ int mc_image_hash(const char *filename,
                   char *out, size_t out_size,
                   char *errbuf, size_t errbuf_size);
 
-// mc_write_tag remuxes infile to outfile with stream copy, preserving all
-// streams, dispositions and existing metadata, and sets the freeform global
-// tag key=value. For MP4/MOV outputs it enables use_metadata_tags so arbitrary
-// keys survive. Mirrors:
+// mc_write_tags remuxes infile to outfile with stream copy, preserving all
+// streams, dispositions and existing metadata, and sets each of the n freeform
+// global tags keys[i]=values[i]. For MP4/MOV outputs it enables
+// use_metadata_tags so arbitrary keys survive. Mirrors:
 //
 //   ffmpeg -i <in> -map 0 -c copy -map_metadata 0 \
-//          -movflags use_metadata_tags -metadata key=value <out>
+//          -movflags use_metadata_tags -metadata k1=v1 -metadata k2=v2 <out>
 //
 // Returns 0 on success or a negative AVERROR code (message in errbuf).
-int mc_write_tag(const char *infile, const char *outfile,
-                 const char *key, const char *value,
-                 char *errbuf, size_t errbuf_size);
+int mc_write_tags(const char *infile, const char *outfile,
+                  const char *const *keys, const char *const *values, int n,
+                  char *errbuf, size_t errbuf_size);
 
 // mc_read_tag reads the freeform global tag key from filename into out.
 // Returns 0 on success, 1 if the tag is absent, or a negative AVERROR code.

@@ -93,3 +93,20 @@ func webpWrite(data []byte, key, value string) ([]byte, error) {
 	kept = append(kept, riffChunk{id: webpTagFourCC, body: []byte(prefix + value)})
 	return webpSerialize(kept), nil
 }
+
+func webpReadAll(data []byte) (map[string]string, error) {
+	chunks, err := webpParse(data)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, c := range chunks {
+		if c.id != webpTagFourCC {
+			continue
+		}
+		if i := bytes.IndexByte(c.body, '='); i > 0 {
+			out[string(c.body[:i])] = string(c.body[i+1:])
+		}
+	}
+	return out, nil
+}

@@ -28,7 +28,8 @@ type File struct {
 	Kind    media.Kind
 	Probe   *ffmpeg.Probe // nil when the file is not a probeable media file
 
-	imgCache map[string]string // memoised imgmeta.Read lookups (image files)
+	imgTags  map[string]string // all imgmeta tags (image files), loaded lazily
+	imgTried bool
 }
 
 // Load stats path and, when it is a recognised media file, probes it. deep
@@ -96,31 +97,34 @@ func (f *File) meta(names ...string) (string, bool) {
 	}
 
 	// FFmpeg's image decoders do not expose our imgmeta tags (JPEG COM, PNG
-	// tEXt, GIF comment, WebP mcTG), so read a directly-named key from there.
-	// (Multi-name lookups like authors/tags come from EXIF, handled above.)
-	if len(names) == 1 && f.Kind == media.KindImage && imgmeta.Supported(f.Path) {
-		if v, ok := f.imgTag(names[0]); ok {
-			return strings.TrimSpace(v), true
+	// tEXt, GIF comment, WebP mcTG), so look there too.
+	if f.Kind == media.KindImage {
+		for _, n := range names {
+			for k, v := range f.imageTags() {
+				if strings.EqualFold(k, n) {
+					return strings.TrimSpace(v), true
+				}
+			}
 		}
 	}
 	return "", false
 }
 
-// imgTag reads an imgmeta tag, memoising both hits and misses.
-func (f *File) imgTag(key string) (string, bool) {
-	if f.imgCache == nil {
-		f.imgCache = map[string]string{}
+// imageTags returns every imgmeta tag on an image file, loaded once.
+func (f *File) imageTags() map[string]string {
+	if !f.imgTried {
+		f.imgTried = true
+		if imgmeta.Supported(f.Path) {
+			if m, err := imgmeta.ReadAll(f.Path); err == nil {
+				f.imgTags = m
+			}
+		}
 	}
-	if v, seen := f.imgCache[key]; seen {
-		return v, v != ""
-	}
-	v, err := imgmeta.Read(f.Path, key)
-	if err != nil {
-		v = ""
-	}
-	f.imgCache[key] = v
-	return v, v != ""
+	return f.imgTags
 }
+
+// ImageTags is imageTags exported for `mc info`.
+func (f *File) ImageTags() map[string]string { return f.imageTags() }
 
 // DisplayValue prepares a metadata value for output: Windows XP* tags are
 // decoded from their UTF-16LE byte dump, everything else is whitespace-cleaned.

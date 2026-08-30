@@ -106,3 +106,20 @@ func jpegWrite(data []byte, key, value string) ([]byte, error) {
 	b.Write(data[tailOff:]) // SOS/EOI .. EOF, untouched
 	return b.Bytes(), nil
 }
+
+func jpegReadAll(data []byte) (map[string]string, error) {
+	segs, _, err := jpegSplit(data)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, s := range segs {
+		if s.marker != jpegCOM {
+			continue
+		}
+		if i := bytes.IndexByte(s.payload, '='); i > 0 {
+			out[string(s.payload[:i])] = string(s.payload[i+1:])
+		}
+	}
+	return out, nil
+}
