@@ -321,3 +321,25 @@ func HumanSize(n int64) string {
 	}
 	return strconv.FormatFloat(val, 'f', 0, 64) + suffix
 }
+
+// FieldNeedsDeepProbe reports whether resolving a --select / --sort-by field
+// needs a deep probe (decoding a frame for image EXIF and the like). Plain
+// filesystem and container-level fields do not.
+func FieldNeedsDeepProbe(field string) bool {
+	switch strings.ToLower(field) {
+	case "name", "path", "size", "modifiedat", "modified", "mtime", "kind", "format":
+		return false
+	default:
+		return true
+	}
+}
+
+// AnyFieldNeedsDeepProbe is FieldNeedsDeepProbe over a list.
+func AnyFieldNeedsDeepProbe(fields []string) bool {
+	for _, f := range fields {
+		if FieldNeedsDeepProbe(f) {
+			return true
+		}
+	}
+	return false
+}

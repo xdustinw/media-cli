@@ -62,9 +62,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   metadata onto the media files in a folder (recursively) that match `--select`.
   Video is remuxed with stream copy (pixels/streams and the `mc.hash` value
   unchanged, only container metadata rewritten); image tags go into the same
-  native text store `mc.hash` uses. Values may contain spaces; a `"…"` wrap
-  keeps a comma inside a value. Previews `key: <current> -> <new>` per file and
-  confirms unless `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
+  native text store `mc.hash` uses (and shares the video remux's parser/probe
+  skips). Values may contain spaces; a `"…"` wrap keeps a comma inside a value.
+  Only files matched by `--select` are probed deeply, and only when the filter
+  needs it. Previews `key: <current> -> <new>` per file and confirms unless
+  `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
   `ffmpeg.WriteTags` / `imgmeta.WriteMany` / `imgmeta.ReadAll` added.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
   modified time; container/codec details per stream; every metadata entry

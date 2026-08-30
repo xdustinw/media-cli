@@ -55,21 +55,34 @@ func Run(ctx context.Context, o Options) error {
 	base := media.DisplayBase(o.Target)
 	log.Info("scanning", "target", o.Target, "files", len(files), "select", o.Select)
 
+	// Probe cheaply while filtering; only pay for a deep probe when --select
+	// actually references a field that needs one (image EXIF etc.).
+	deepFilter := mediainfo.AnyFieldNeedsDeepProbe(sel.Fields())
+
 	var targets []*mediainfo.File
 	var scanErrs int
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		mf, err := mediainfo.Load(f, true)
+		mf, err := mediainfo.Load(f, deepFilter)
 		if err != nil {
 			scanErrs++
 			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), err)
 			continue
 		}
-		if sel.Match(mf) {
-			targets = append(targets, mf)
+		if !sel.Match(mf) {
+			continue
 		}
+		// For the preview's "current value" column, an image's EXIF needs a
+		// deep probe (cheap for images); a video's tags are already in the
+		// shallow probe's container metadata.
+		if !deepFilter && mf.Kind == media.KindImage {
+			if deep, derr := mediainfo.Load(f, true); derr == nil {
+				mf = deep
+			}
+		}
+		targets = append(targets, mf)
 	}
 
 	if len(targets) == 0 {

@@ -293,29 +293,9 @@ func discover(ctx context.Context, root string) ([]string, error) {
 }
 
 func selectorNeedsDeep(sel *query.Selector) bool {
-	for _, field := range sel.Fields() {
-		if fieldNeedsDeep(field) {
-			return true
-		}
-	}
-	return false
+	return mediainfo.AnyFieldNeedsDeepProbe(sel.Fields())
 }
 
 func metaNeedsDeep(meta []string) bool {
-	for _, m := range meta {
-		if fieldNeedsDeep(m) {
-			return true
-		}
-	}
-	return false
-}
-
-func fieldNeedsDeep(field string) bool {
-	switch strings.ToLower(field) {
-	case "name", "path", "size", "modifiedat", "modified", "mtime", "kind", "format":
-		return false
-	default:
-		// rating / authors / tags / arbitrary EXIF -> decode a frame.
-		return true
-	}
+	return mediainfo.AnyFieldNeedsDeepProbe(meta)
 }
