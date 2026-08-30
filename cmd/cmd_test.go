@@ -40,6 +40,7 @@ func TestListInfoHelp(t *testing.T) {
 	for _, tc := range []struct{ cmd, want string }{
 		{"list", "--select"},
 		{"info", "EXIF"},
+		{"set", "key=value"},
 	} {
 		var out bytes.Buffer
 		rootCmd.SetOut(&out)

@@ -27,20 +27,21 @@ var ErrTagAbsent = errors.New("image metadata tag not present")
 var ErrUnsupportedFormat = errors.New("unsupported image format for metadata")
 
 type codec struct {
-	read  func(data []byte, key string) (string, error)
-	write func(data []byte, key, value string) ([]byte, error)
+	read    func(data []byte, key string) (string, error)
+	readAll func(data []byte) (map[string]string, error)
+	write   func(data []byte, key, value string) ([]byte, error)
 }
 
 func codecFor(path string) (codec, bool) {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".png", ".apng":
-		return codec{read: pngRead, write: pngWrite}, true
+		return codec{read: pngRead, readAll: pngReadAll, write: pngWrite}, true
 	case ".jpg", ".jpeg", ".jpe", ".jfif":
-		return codec{read: jpegRead, write: jpegWrite}, true
+		return codec{read: jpegRead, readAll: jpegReadAll, write: jpegWrite}, true
 	case ".gif":
-		return codec{read: gifRead, write: gifWrite}, true
+		return codec{read: gifRead, readAll: gifReadAll, write: gifWrite}, true
 	case ".webp":
-		return codec{read: webpRead, write: webpWrite}, true
+		return codec{read: webpRead, readAll: webpReadAll, write: webpWrite}, true
 	default:
 		return codec{}, false
 	}
@@ -65,20 +66,43 @@ func Read(path, key string) (string, error) {
 	return c.read(data, key)
 }
 
+// ReadAll returns every mc-written tag in the image at path.
+func ReadAll(path string) (map[string]string, error) {
+	c, ok := codecFor(path)
+	if !ok {
+		return nil, ErrUnsupportedFormat
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return c.readAll(data)
+}
+
 // Write reads src, inserts or replaces key=value, and writes the result to dst.
 // Pixel data is copied verbatim. dst and src may not be the same path.
 func Write(src, dst, key, value string) error {
+	return WriteMany(src, dst, []string{key}, []string{value})
+}
+
+// WriteMany inserts or replaces each keys[i]=values[i] and writes the result to
+// dst. Pixel data is copied verbatim.
+func WriteMany(src, dst string, keys, values []string) error {
+	if len(keys) != len(values) {
+		return errors.New("imgmeta: keys and values length mismatch")
+	}
 	c, ok := codecFor(src)
 	if !ok {
 		return ErrUnsupportedFormat
 	}
-	in, err := os.ReadFile(src)
+	data, err := os.ReadFile(src)
 	if err != nil {
 		return err
 	}
-	out, err := c.write(in, key, value)
-	if err != nil {
-		return err
+	for i := range keys {
+		if data, err = c.write(data, keys[i], values[i]); err != nil {
+			return err
+		}
 	}
-	return os.WriteFile(dst, out, 0o644)
+	return os.WriteFile(dst, data, 0o644)
 }

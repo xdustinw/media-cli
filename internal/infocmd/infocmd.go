@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"sort"
 	"time"
 
 	"github.com/xdustinw/media-cli/internal/ffmpeg"
@@ -93,6 +94,23 @@ func build(f *mediainfo.File) *render.OM {
 
 	if md := dictOM(p.Metadata); md.Len() > 0 {
 		doc.Set("metadata", md)
+	}
+
+	// mc-written tags on images (JPEG COM / PNG tEXt / GIF comment / WebP chunk)
+	// are invisible to FFmpeg's decoders, so surface them separately.
+	if isImage {
+		if tags := f.ImageTags(); len(tags) > 0 {
+			keys := make([]string, 0, len(tags))
+			for k := range tags {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			om := render.NewOM()
+			for _, k := range keys {
+				om.Set(k, mediainfo.CleanValue(tags[k]))
+			}
+			doc.Set("mc_metadata", om)
+		}
 	}
 	return doc
 }

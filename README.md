@@ -64,6 +64,7 @@ the old `mc.exe` as `mc-<version>.exe`).
 | --- | --- |
 | [`mc hash`](#mc-hash) | Hash media by content, then tag and rename each file |
 | [`mc list`](#mc-list) | List a folder's media with size and metadata, filter & sort |
+| [`mc set`](#mc-set) | Write chosen metadata onto matching files in a folder |
 | [`mc info`](#mc-info) | Dump everything known about one file |
 | [`mc update`](#mc-update) | Update `mc` to the latest release |
 | [`mc version`](#mc-version) | Print version and bundled-FFmpeg info |
@@ -104,7 +105,8 @@ Then, after `[y/N]` (or with `-y`), for each pending file it:
 
 1. writes the tag `mc.hash=<hash>` into the file — pixels and streams are left
    byte-for-byte untouched;
-2. renames it to `<name>.<first 6 of hash>.<ext>`.
+2. renames it to `<name>.<first 6 of hash>.<ext>` (replacing an existing
+   `.<6-hex>` slot rather than appending a second one).
 
 **By default a file that already carries a valid `mc.hash` tag is trusted and
 not re-hashed** — the stored value is used directly, so re-running on a large,
@@ -150,6 +152,32 @@ $ mc list tmp
 - `--sort-by` – comma-separated keys, each optionally `desc` (default `name`);
   folders are always alphabetical.
 - `--format` – `toon` (default), `json`, or `csv`.
+
+### `mc set`
+
+```
+mc set '<key=value,...>' <folder> [--select=<expr>] [-y]
+```
+
+Writes metadata onto the media files in `<folder>` (recursively) that match
+`--select`.
+
+```bash
+mc set 'rating=3,author=Adam' ~/Photos --select='name=3*Adam*'
+mc set 'title=Trip 2026' ~/Videos --select='name=DSC*' -y
+mc set 'author="Doe, Jane"' ~/Photos --select='author=old-name'   # quote to keep a comma
+```
+
+- Video files are **remuxed with stream copy** — pixels and streams are
+  untouched, so the `mc hash` value does not change; only the container metadata
+  is rewritten.
+- Image tags go into the file's native text area (PNG `tEXt`, JPEG `COM`, GIF
+  comment, WebP chunk), the same store `mc.hash` uses. `mc list` / `mc info`
+  read them back.
+- `--select` uses the same expression as [`mc list`](#mc-list). **Pass it** —
+  without it every media file in the folder is updated.
+- The change is previewed (`key: <current> -> <new>` per file) and confirmed
+  unless `-y`.
 
 ### `mc info`
 

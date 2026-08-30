@@ -117,6 +117,42 @@ func TestRoundTripAllFormats(t *testing.T) {
 	}
 }
 
+func TestWriteManyAndReadAll(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"a.png": encPNG(t), "a.jpg": encJPEG(t), "a.gif": encGIF(t), "a.webp": synthWebP(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, name)
+			if err := os.WriteFile(src, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dst := filepath.Join(dir, "out"+filepath.Ext(name))
+			if err := WriteMany(src, dst,
+				[]string{"rating", "author", "mc.hash"},
+				[]string{"3", "Doe, Jane", "deadbeef"}); err != nil {
+				t.Fatalf("WriteMany: %v", err)
+			}
+			all, err := ReadAll(dst)
+			if err != nil {
+				t.Fatalf("ReadAll: %v", err)
+			}
+			if all["rating"] != "3" || all["author"] != "Doe, Jane" || all["mc.hash"] != "deadbeef" {
+				t.Fatalf("ReadAll = %v", all)
+			}
+			// a later WriteMany replaces, not duplicates
+			dst2 := filepath.Join(dir, "out2"+filepath.Ext(name))
+			if err := WriteMany(dst, dst2, []string{"rating"}, []string{"5"}); err != nil {
+				t.Fatal(err)
+			}
+			all2, _ := ReadAll(dst2)
+			if all2["rating"] != "5" || all2["author"] != "Doe, Jane" {
+				t.Fatalf("rewrite: %v", all2)
+			}
+		})
+	}
+}
+
 func TestUnsupported(t *testing.T) {
 	if Supported("x.bmp") {
 		t.Fatal("bmp should be unsupported")

@@ -8,10 +8,18 @@ import (
 )
 
 func TestHashedName(t *testing.T) {
-	got := HashedName(filepath.FromSlash("/v/movie.mp4"), "1a2b3c")
-	want := filepath.FromSlash("/v/movie.1a2b3c.mp4")
-	if got != want {
-		t.Fatalf("HashedName = %q, want %q", got, want)
+	cases := map[string]string{
+		"/v/movie.mp4":        "/v/movie.1a2b3c.mp4",
+		"/v/movie.9f8e7d.mp4": "/v/movie.1a2b3c.mp4", // replace an existing hash slot
+		"/v/movie.9F8E7D.mp4": "/v/movie.1a2b3c.mp4", // uppercase hex too
+		"/v/a.b.c.mkv":        "/v/a.b.c.1a2b3c.mkv", // ".c" is not 6 hex -> keep
+		"/v/clip.123456.mov":  "/v/clip.1a2b3c.mov",  // digits are hex
+	}
+	for in, want := range cases {
+		got := HashedName(filepath.FromSlash(in), "1a2b3c")
+		if got != filepath.FromSlash(want) {
+			t.Errorf("HashedName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

@@ -169,3 +169,24 @@ func gifWrite(data []byte, key, value string) ([]byte, error) {
 	b.Write(data[pos:])
 	return b.Bytes(), nil
 }
+
+func gifReadAll(data []byte) (map[string]string, error) {
+	start, err := gifPrefixLen(data)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	werr := gifWalk(data, start, func(kind, label byte, s, e int) {
+		if kind != 0x21 || label != 0xFE {
+			return
+		}
+		p := gifCommentPayload(data, s)
+		if i := bytes.IndexByte(p, '='); i > 0 {
+			out[string(p[:i])] = string(p[i+1:])
+		}
+	})
+	if werr != nil {
+		return nil, werr
+	}
+	return out, nil
+}

@@ -114,3 +114,20 @@ func pngWrite(data []byte, key, value string) ([]byte, error) {
 	}
 	return pngSerialize(out), nil
 }
+
+func pngReadAll(data []byte) (map[string]string, error) {
+	chunks, err := pngParse(data)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, c := range chunks {
+		if c.typ != "tEXt" {
+			continue
+		}
+		if i := bytes.IndexByte(c.data, 0); i >= 0 {
+			out[string(c.data[:i])] = string(c.data[i+1:])
+		}
+	}
+	return out, nil
+}
