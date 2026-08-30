@@ -46,4 +46,26 @@ int mc_read_tag(const char *filename, const char *key,
                 char *out, size_t out_size,
                 char *errbuf, size_t errbuf_size);
 
+// mc_probe opens filename and produces a flat "key=value\n" report describing
+// the container, every stream and all metadata. Values are escaped: backslash
+// -> "\\", newline -> "\n", tab -> "\t".
+//
+// Keys:
+//   format.name, format.long_name, format.duration_us, format.bit_rate,
+//   format.nb_streams
+//   metadata.<key>
+//   stream.<i>.type|codec|codec_long|profile|bit_rate|duration_us
+//   stream.<i>.width|height|pix_fmt|fps|sar            (video)
+//   stream.<i>.sample_rate|channels|channel_layout|sample_fmt  (audio)
+//   stream.<i>.metadata.<key>
+//
+// When deep is non-zero, the first video frame is decoded and its frame-level
+// metadata (image EXIF, PNG text, ...) is merged under metadata.<key>.
+//
+// On success *out is set to an av_malloc'd NUL-terminated string that the
+// caller must free with av_free, and 0 is returned. On failure a negative
+// AVERROR code is returned (message in errbuf) and *out is left NULL.
+int mc_probe(const char *filename, int deep,
+             char **out, char *errbuf, size_t errbuf_size);
+
 #endif

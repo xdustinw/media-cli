@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	github.com/toon-format/toon-go v0.0.0-20251202084852-7ca0e27c4e8c
 )
 
 require (

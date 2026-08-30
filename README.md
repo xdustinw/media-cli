@@ -62,6 +62,8 @@ the old `mc.exe` as `mc-<version>.exe`).
 | Command | Description |
 | --- | --- |
 | [`mc hash`](#mc-hash) | Hash media by content, then tag and rename each file |
+| [`mc list`](#mc-list) | List a folder's media with size and metadata, filter & sort |
+| [`mc info`](#mc-info) | Dump everything known about one file |
 | [`mc update`](#mc-update) | Update `mc` to the latest release |
 | [`mc version`](#mc-version) | Print version and bundled-FFmpeg info |
 
@@ -95,6 +97,45 @@ or with `-y`):
 
 Files already hashed and named are skipped. A file whose stored `mc.hash` no
 longer matches its content gets a warning and is re-tagged.
+
+### `mc list`
+
+```
+mc list <folder> [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--format=toon|json|csv]
+```
+
+Walks `<folder>` recursively and prints one flat row per file: `filename`,
+`size`, `mc.hash`, `rating`, `authors`, `tags`.
+
+```bash
+mc list ~/Photos
+mc list ~/Photos --meta=make,model,DateTimeOriginal
+mc list ~/Videos --select='rating>=4 and size>1g' --sort-by='rating desc, size desc'
+mc list ~/Photos --format=csv > inventory.csv          # csv rows carry absolute paths
+```
+
+- `--meta` – extra metadata columns, comma separated.
+- `--select` – keep matching files. Fields: `name`, `path`, `size`,
+  `modifiedAt`, `rating`, `kind`, `format`, `authors`, `tags`, or any metadata
+  key. Operators `= != > < >= <=` (`=` supports `*`/`?` globs); sizes take
+  `k`/`m`/`g`/`t` suffixes; dates are `YYYY-MM-DD`. Combine with `and` / `or`.
+- `--sort-by` – comma-separated keys, each optionally `desc` (default `name`).
+- `--format` – `toon` (default), `json`, or `csv`.
+
+### `mc info`
+
+```
+mc info <file> [--format=toon|json]
+```
+
+Prints path, size and modified time; container format, duration and bitrate;
+every stream's codec and parameters; and all embedded metadata, including image
+EXIF and PNG text.
+
+```bash
+mc info clip.mkv
+mc info photo.jpg --format=json
+```
 
 ### `mc update`
 

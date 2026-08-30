@@ -33,6 +33,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     is found (tag present but no longer matching the content), it prints a
     warning and re-tags. The preview's `reason` column shows `new`,
     `rename only`, or `content hash changed`.
+- **`mc list <folder> [flags]`**: recursive listing of a folder's files, one
+  flat row each: `filename`, `size` (human readable), `mc.hash`, `rating`,
+  `authors`, `tags`. `mc.hash` is read from container metadata (video) or the
+  imgmeta record (images).
+  - `--meta=title,make,...` adds metadata columns; `--format=toon|json|csv`
+    (toon and csv are tabular; csv rows carry absolute paths).
+  - `--select='name=sample* and rating>=4 and size>1g and modifiedAt>2026-08-01'`
+    filters — fields `name/path/size/modifiedAt/rating/kind/format/authors/tags`
+    or any metadata key, operators `= != > < >= <=` (globs on `=`), size
+    suffixes `k/m/g/t`, `and`/`or`.
+  - `--sort-by='rating desc, size desc, name'` — multi-key, optional `desc`.
+- **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
+  modified time; container/codec details per stream; and every metadata entry
+  (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail
+  blobs dropped).
+- **`internal/ffmpeg.Inspect`** (cgo `mc_probe`): container + stream + metadata
+  probe, optionally decoding the first frame for image EXIF. New support
+  packages: `internal/mediainfo` (derives rating/authors/tags, size formatting),
+  `internal/query` (`--select` / `--sort-by` parser + evaluator),
+  `internal/render` (TOON/JSON/CSV, ordered output). TOON output uses
+  `github.com/toon-format/toon-go`.
 - **`mc update [-y]`**: checks GitHub releases for a newer version and replaces
   the running binary in place — resolving the executable through symlinks so it
   updates wherever `mc` sits on `PATH`. Unix does an atomic rename; Windows

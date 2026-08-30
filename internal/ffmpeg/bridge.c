@@ -5,14 +5,20 @@
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavutil/avstring.h>
 #include <libavutil/avutil.h>
+#include <libavutil/bprint.h>
+#include <libavutil/channel_layout.h>
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
 #include <libavutil/hash.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/intreadwrite.h>
+#include <libavutil/mathematics.h>
 #include <libavutil/mem.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
+#include <libavutil/samplefmt.h>
 
 static void set_err(char *errbuf, size_t errbuf_size, int code) {
     if (!errbuf || errbuf_size == 0) {
@@ -534,4 +540,196 @@ int mc_read_tag(const char *filename, const char *key,
 
     avformat_close_input(&ic);
     return rc;
+}
+
+// ---- mc_probe ---------------------------------------------------------------
+
+static void probe_emit(AVBPrint *bp, const char *key, const char *val) {
+    if (!val) {
+        return;
+    }
+    av_bprintf(bp, "%s=", key);
+    for (const unsigned char *p = (const unsigned char *)val; *p; p++) {
+        switch (*p) {
+        case '\\': av_bprintf(bp, "\\\\"); break;
+        case '\n': av_bprintf(bp, "\\n"); break;
+        case '\t': av_bprintf(bp, "\\t"); break;
+        case '\r': break;
+        default:   av_bprint_chars(bp, (char)*p, 1);
+        }
+    }
+    av_bprint_chars(bp, '\n', 1);
+}
+
+static void probe_emit_int(AVBPrint *bp, const char *key, long long v) {
+    char b[32];
+    snprintf(b, sizeof b, "%lld", v);
+    probe_emit(bp, key, b);
+}
+
+static void probe_emit_dict(AVBPrint *bp, const char *prefix, const AVDictionary *d) {
+    const AVDictionaryEntry *e = NULL;
+    char key[512];
+    while ((e = av_dict_get(d, "", e, AV_DICT_IGNORE_SUFFIX))) {
+        snprintf(key, sizeof key, "%s%s", prefix, e->key);
+        probe_emit(bp, key, e->value);
+    }
+}
+
+static void probe_deep_frame_meta(AVBPrint *bp, AVFormatContext *ic) {
+    int vs = av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    if (vs < 0) {
+        return;
+    }
+    AVStream *st = ic->streams[vs];
+    const AVCodec *dec = avcodec_find_decoder(st->codecpar->codec_id);
+    if (!dec) {
+        return;
+    }
+    AVCodecContext *dc = avcodec_alloc_context3(dec);
+    if (!dc) {
+        return;
+    }
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *fr = av_frame_alloc();
+    if (dc && pkt && fr &&
+        avcodec_parameters_to_context(dc, st->codecpar) >= 0 &&
+        avcodec_open2(dc, dec, NULL) >= 0) {
+        int done = 0;
+        while (!done && av_read_frame(ic, pkt) >= 0) {
+            if (pkt->stream_index == vs && avcodec_send_packet(dc, pkt) >= 0) {
+                if (avcodec_receive_frame(dc, fr) >= 0) {
+                    probe_emit_dict(bp, "metadata.", fr->metadata);
+                    av_frame_unref(fr);
+                    done = 1;
+                }
+            }
+            av_packet_unref(pkt);
+        }
+    }
+    av_frame_free(&fr);
+    av_packet_free(&pkt);
+    avcodec_free_context(&dc);
+}
+
+int mc_probe(const char *filename, int deep,
+             char **out, char *errbuf, size_t errbuf_size) {
+    if (out) {
+        *out = NULL;
+    }
+
+    AVFormatContext *ic = NULL;
+    int ret = avformat_open_input(&ic, filename, NULL, NULL);
+    if (ret < 0) {
+        set_err(errbuf, errbuf_size, ret);
+        return ret;
+    }
+    ret = avformat_find_stream_info(ic, NULL);
+    if (ret < 0) {
+        set_err(errbuf, errbuf_size, ret);
+        avformat_close_input(&ic);
+        return ret;
+    }
+
+    AVBPrint bp;
+    av_bprint_init(&bp, 4096, AV_BPRINT_SIZE_UNLIMITED);
+
+    probe_emit(&bp, "format.name", ic->iformat && ic->iformat->name ? ic->iformat->name : "");
+    if (ic->iformat && ic->iformat->long_name) {
+        probe_emit(&bp, "format.long_name", ic->iformat->long_name);
+    }
+    if (ic->duration != AV_NOPTS_VALUE) {
+        probe_emit_int(&bp, "format.duration_us", (long long)ic->duration);
+    }
+    if (ic->bit_rate > 0) {
+        probe_emit_int(&bp, "format.bit_rate", (long long)ic->bit_rate);
+    }
+    probe_emit_int(&bp, "format.nb_streams", (long long)ic->nb_streams);
+    probe_emit_dict(&bp, "metadata.", ic->metadata);
+
+    for (unsigned i = 0; i < ic->nb_streams; i++) {
+        AVStream *st = ic->streams[i];
+        AVCodecParameters *cp = st->codecpar;
+        char pfx[32];
+        snprintf(pfx, sizeof pfx, "stream.%u.", i);
+        char key[64];
+#define PK(name) (snprintf(key, sizeof key, "%s%s", pfx, (name)), key)
+
+        const char *mt = av_get_media_type_string(cp->codec_type);
+        probe_emit(&bp, PK("type"), mt ? mt : "unknown");
+        probe_emit(&bp, PK("codec"), avcodec_get_name(cp->codec_id));
+        const AVCodecDescriptor *cd = avcodec_descriptor_get(cp->codec_id);
+        if (cd && cd->long_name) {
+            probe_emit(&bp, PK("codec_long"), cd->long_name);
+        }
+        const char *prof = avcodec_profile_name(cp->codec_id, cp->profile);
+        if (prof) {
+            probe_emit(&bp, PK("profile"), prof);
+        }
+
+        if (cp->codec_type == AVMEDIA_TYPE_VIDEO) {
+            probe_emit_int(&bp, PK("width"), cp->width);
+            probe_emit_int(&bp, PK("height"), cp->height);
+            const char *pf = av_get_pix_fmt_name((enum AVPixelFormat)cp->format);
+            if (pf) {
+                probe_emit(&bp, PK("pix_fmt"), pf);
+            }
+            if (st->avg_frame_rate.num > 0 && st->avg_frame_rate.den > 0) {
+                char b[32];
+                snprintf(b, sizeof b, "%.6g", av_q2d(st->avg_frame_rate));
+                probe_emit(&bp, PK("fps"), b);
+            }
+            if (cp->sample_aspect_ratio.num > 0) {
+                char b[32];
+                snprintf(b, sizeof b, "%d:%d",
+                         cp->sample_aspect_ratio.num, cp->sample_aspect_ratio.den);
+                probe_emit(&bp, PK("sar"), b);
+            }
+        } else if (cp->codec_type == AVMEDIA_TYPE_AUDIO) {
+            probe_emit_int(&bp, PK("sample_rate"), cp->sample_rate);
+            probe_emit_int(&bp, PK("channels"), cp->ch_layout.nb_channels);
+            char b[64];
+            if (av_channel_layout_describe(&cp->ch_layout, b, sizeof b) > 0) {
+                probe_emit(&bp, PK("channel_layout"), b);
+            }
+            const char *sf = av_get_sample_fmt_name((enum AVSampleFormat)cp->format);
+            if (sf) {
+                probe_emit(&bp, PK("sample_fmt"), sf);
+            }
+        }
+
+        if (cp->bit_rate > 0) {
+            probe_emit_int(&bp, PK("bit_rate"), (long long)cp->bit_rate);
+        }
+        if (st->duration != AV_NOPTS_VALUE) {
+            long long us = av_rescale_q(st->duration, st->time_base,
+                                        (AVRational){1, 1000000});
+            if (us > 0) {
+                probe_emit_int(&bp, PK("duration_us"), us);
+            }
+        }
+        probe_emit_dict(&bp, PK("metadata."), st->metadata);
+#undef PK
+    }
+
+    if (deep) {
+        probe_deep_frame_meta(&bp, ic);
+    }
+
+    if (!av_bprint_is_complete(&bp)) {
+        av_bprint_finalize(&bp, NULL);
+        avformat_close_input(&ic);
+        set_err(errbuf, errbuf_size, AVERROR(ENOMEM));
+        return AVERROR(ENOMEM);
+    }
+
+    char *s = NULL;
+    ret = av_bprint_finalize(&bp, &s);
+    avformat_close_input(&ic);
+    if (ret < 0) {
+        set_err(errbuf, errbuf_size, ret);
+        return ret;
+    }
+    *out = s; // caller frees with av_free
+    return 0;
 }
