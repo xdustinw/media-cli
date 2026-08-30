@@ -17,7 +17,7 @@ var (
 )
 
 var hashCmd = &cobra.Command{
-	Use:   "hash <file or folder>",
+	Use:   "hash [file or folder]",
 	Short: "Compute the metadata-independent MD5 of media files and tag them",
 	Long: `hash calculates a metadata-independent MD5 for each media file:
 
@@ -35,11 +35,11 @@ processed a preview line is printed; then you confirm writing the tag
 
     <name>.<first 6 of hash>.<ext>
 
-By default a file that already carries a valid 'mc.hash' tag is trusted and not
-re-hashed (fast on large, already-processed folders). Pass -f/--force to
-re-compute every hash and compare it with the stored tag. Pass -y to skip the
-confirmation.`,
-	Args: cobra.ExactArgs(1),
+The target defaults to the current directory. By default a file that already
+carries a valid 'mc.hash' tag is trusted and not re-hashed (fast on large,
+already-processed folders). Pass -f/--force to re-compute every hash and compare
+it with the stored tag. Pass -y to skip the confirmation.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("yes") {
 			vip.Set(config.KeyAssumeYes, flagAssumeYes)
@@ -47,7 +47,7 @@ confirmation.`,
 
 		in := bufio.NewReader(cmd.InOrStdin())
 		opts := hashcmd.Options{
-			Target:      args[0],
+			Target:      argOr(args, 0, "."),
 			Extensions:  vip.GetStringSlice(config.KeyMediaExts),
 			MetadataKey: vip.GetString(config.KeyHashMetaKey),
 			NameLength:  vip.GetInt(config.KeyHashNameLen),

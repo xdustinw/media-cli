@@ -8,6 +8,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// argOr returns args[i] if present, otherwise def. Used to make a trailing
+// path argument optional (default ".").
+func argOr(args []string, i int, def string) string {
+	if i < len(args) && args[i] != "" {
+		return args[i]
+	}
+	return def
+}
+
 // confirm prints prompt to the command's stdout and reads a line from its
 // stdin, returning true only for "y" / "yes" (case-insensitive). EOF or a read
 // error counts as "no".

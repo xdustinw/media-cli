@@ -74,16 +74,17 @@ Global flags: `-v/--verbose`, `--debug`, `--config <path>`.
 ### `mc hash`
 
 ```
-mc hash <file or folder> [-y] [-f]
+mc hash [file or folder] [-y] [-f]      # target defaults to the current directory
 ```
 
 Hash media by content, then write the hash into the file and rename it.
 
 ```bash
-mc hash movie.mp4              # hash one file, confirm changes
-mc hash ~/Videos              # recurse a folder
-mc hash ~/Photos -y           # no confirmation prompt
-mc hash ~/Photos -f           # re-hash even files that already have mc.hash
+mc hash                       # hash the current directory
+mc hash movie.mp4             # hash one file, confirm changes
+mc hash ~/Videos             # recurse a folder
+mc hash ~/Photos -y          # no confirmation prompt
+mc hash ~/Photos -f          # re-hash even files that already have mc.hash
 ```
 
 | | |
@@ -118,10 +119,10 @@ and the tag rewritten.
 ### `mc list`
 
 ```
-mc list <folder> [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--format=toon|json|csv]
+mc list [folder] [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--format=toon|json|csv]
 ```
 
-Walks `<folder>` recursively. Each file row is `filename`, `size`, `mc.hash`,
+Walks `[folder]` (default: current directory) recursively. Each file row is `filename`, `size`, `mc.hash`,
 `rating`, `authors`, `tags` (+ any `--meta` columns). `toon` and `json` nest the
 rows under their folders; `csv` is one flat table with absolute paths.
 
@@ -157,11 +158,11 @@ $ mc list tmp
 ### `mc set`
 
 ```
-mc set '<key=value,...>' <folder> [--select=<expr>] [-y]
+mc set '<key=value,...>' [folder] [--select=<expr>] [-y]
 ```
 
-Writes metadata onto the media files in `<folder>` (recursively) that match
-`--select`.
+Writes metadata onto the media files (recursively) in `[folder]` — default the
+current directory — that match `--select`.
 
 ```bash
 mc set 'rating=3,author=Adam' ~/Photos --select='name=3*Adam*'

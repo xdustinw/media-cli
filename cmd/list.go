@@ -18,10 +18,10 @@ var (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list <folder>",
+	Use:   "list [folder]",
 	Short: "List media files in a folder with size and metadata",
-	Long: `list walks <folder> recursively. Each file row is:
-filename, size, mc.hash, rating, authors, tags.
+	Long: `list walks <folder> (default: current directory) recursively. Each file
+row is: filename, size, mc.hash, rating, authors, tags.
 toon/json nest the rows under their folders; csv is one flat table (absolute paths).
 
   --meta      extra metadata columns, comma separated (e.g. --meta=title,make,model)
@@ -34,14 +34,14 @@ toon/json nest the rows under their folders; csv is one flat table (absolute pat
   --sort-by   comma separated keys with optional 'desc', e.g.
               --sort-by='rating desc, size desc, name'
   --format    toon (default), json, or csv (csv uses absolute paths)`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, err := render.ParseFormat(flagListFormat, render.TOON, render.JSON, render.CSV)
 		if err != nil {
 			return err
 		}
 		return listcmd.Run(cmd.Context(), listcmd.Options{
-			Root:    args[0],
+			Root:    argOr(args, 0, "."),
 			HashKey: vip.GetString(config.KeyHashMetaKey),
 			Meta:    splitCSVFlag(flagListMeta),
 			SortBy:  flagListSortBy,

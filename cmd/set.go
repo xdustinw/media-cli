@@ -14,10 +14,10 @@ var (
 )
 
 var setCmd = &cobra.Command{
-	Use:   "set <key=value,...> <folder>",
+	Use:   "set <key=value,...> [folder]",
 	Short: "Write chosen metadata onto matching media files in a folder",
 	Long: `set writes one or more metadata key/value pairs onto the media files in
-<folder> (recursively).
+[folder] (default: current directory), recursively.
 
   mc set 'rating=3,author=Adam' ~/Photos --select='name=3*Adam*'
 
@@ -28,14 +28,14 @@ tEXt, JPEG COM, GIF comment, WebP chunk).
 
 You are strongly encouraged to pass --select — without it every media file in
 the folder is updated. The change is previewed and confirmed (unless -y).`,
-	Args: cobra.ExactArgs(2),
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		tags, err := tag.Parse(args[0])
 		if err != nil {
 			return err
 		}
 		return setcmd.Run(cmd.Context(), setcmd.Options{
-			Target:     args[1],
+			Target:     argOr(args, 1, "."),
 			Tags:       tags,
 			Select:     flagSetSelect,
 			Extensions: vip.GetStringSlice(config.KeyMediaExts),

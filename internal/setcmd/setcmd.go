@@ -93,7 +93,7 @@ func Run(ctx context.Context, o Options) error {
 	// Preview: per file, "key: <current> -> <new>" for each tag.
 	fmt.Fprintf(o.Stdout, "Set  %s  on %d file(s):\n", o.Tags, len(targets))
 	for _, f := range targets {
-		fmt.Fprintf(o.Stdout, "  %s\n", media.RelTo(base, f.Abs))
+		fmt.Fprintf(o.Stdout, "  %s\n", media.RelTo(base, f.Path))
 		for _, p := range o.Tags {
 			cur, ok := f.Meta(p.Key)
 			from := "(unset)"
@@ -126,11 +126,11 @@ func Run(ctx context.Context, o Options) error {
 		}
 		if err := apply(f, o.Tags); err != nil {
 			applyErrs++
-			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f.Abs), err)
+			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f.Path), err)
 			continue
 		}
 		log.Info("set", "file", f.Abs, "tags", o.Tags.String())
-		fmt.Fprintf(o.Stdout, "  ✓ %s\n", media.RelTo(base, f.Abs))
+		fmt.Fprintf(o.Stdout, "  ✓ %s\n", media.RelTo(base, f.Path))
 	}
 
 	if applyErrs > 0 {
