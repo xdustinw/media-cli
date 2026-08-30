@@ -1,0 +1,14 @@
+prefix=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64
+exec_prefix=${prefix}
+libdir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/lib
+includedir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 63.8.101
+Requires: libavutil >= 61.6.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavcodec -pthread -lm -latomic -lz
+Libs.private: 
+Cflags: -I${includedir}

@@ -1,0 +1,53 @@
+# Changelog
+
+All notable changes to this project are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-08-29
+
+### Added
+
+- **Project scaffold**: Cobra command tree (`mc`), Viper config (`MC_` env
+  prefix, optional `media-cli.yaml`), `slog` logging (`--verbose` / `--debug`),
+  and a `version` command from an embedded `cmd/version.txt` (overridable at
+  build time via `-ldflags -X .../cmd.buildVersion`).
+- **Vendored FFmpeg** (`third_party/ffmpeg/<goos>_<goarch>/`): statically linked
+  libav* built via cgo — no `ffmpeg` binary needed. Only linux/amd64 is checked
+  in; `scripts/build-ffmpeg.sh` builds any target (host or cross), fetching the
+  pinned FFmpeg source when `../ref/ffmpeg` is absent. Audio/video use stream
+  copy; a curated set of still-image decoders is enabled for image hashing.
+- **`mc hash <file|folder> [-y]`**: computes a metadata-independent MD5 for each
+  video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe .jfif
+  .png .apng .gif .webp`) file, recursively for folders.
+  - Video: hash of the encoded video+audio streams, ignoring container metadata
+    (equivalent to `ffmpeg -map 0:v? -map 0:a? -f hash -hash md5 -`).
+  - Image: hash of the decoded pixels, ignoring EXIF / XMP / ICC / text chunks.
+  - Prints `<hash> - <path>`, shows a TOON preview, then on confirmation (or
+    `-y`) writes the freeform tag `mc.hash=<hash>` and renames each file to
+    `<name>.<first 6 of hash>.<ext>`.
+  - Tag writes never alter pixels or streams: video is remuxed with stream copy;
+    images get a native text record (PNG `tEXt`, JPEG `COM`, GIF comment, WebP
+    `mcTG` chunk) added via `internal/imgmeta`.
+  - Files already tagged and correctly named are skipped. If a stale `mc.hash`
+    is found (tag present but no longer matching the content), it prints a
+    warning and re-tags. The preview's `reason` column shows `new`,
+    `rename only`, or `content hash changed`.
+- **`mc update [-y]`**: checks GitHub releases for a newer version and replaces
+  the running binary in place — resolving the executable through symlinks so it
+  updates wherever `mc` sits on `PATH`. Unix does an atomic rename; Windows
+  renames the running `mc.exe` to `mc-<version>.exe` first. Skips the download
+  when already current; `-y` skips the prompt. Logic in `internal/selfupdate`.
+- **License compliance**: FFmpeg is LGPL-2.1-or-later and statically linked, so
+  the repo carries `third_party/ffmpeg/COPYING.LGPLv2.1` / `COPYING.LGPLv3` /
+  `LICENSE.md`, a root `THIRD-PARTY-NOTICES.md` (notice + corresponding-source
+  pointer + LGPL §6 relink steps), a License section in the README, and
+  `mc version` now prints the bundled FFmpeg version and license. Releases
+  attach `THIRD-PARTY-NOTICES.md`. The build enables no GPL/nonfree parts.
+- **Release workflow** (`.github/workflows/release.yml`): builds
+  `mc-linux-amd64`, `mc-darwin-arm64`, `mc-darwin-amd64` and
+  `mc-windows-amd64.exe` — each on a matching runner building its own static
+  FFmpeg from the pinned commit (Windows cross-compiled from Linux with
+  mingw-w64) — then publishes one GitHub Release: a rolling `preview`
+  pre-release on `main` pushes, a versioned release on `v*` tags, plus a manual
+  `workflow_dispatch` trigger.

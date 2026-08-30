@@ -1,0 +1,60 @@
+# If you prefer the allow list template instead of the deny list, see community template:
+# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
+#
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+
+# Vendored FFmpeg: only the linux/amd64 static build is checked in; other
+# platforms' libraries are produced in CI by scripts/build-ffmpeg.sh.
+!third_party/ffmpeg/linux_amd64/**
+third_party/ffmpeg/darwin_*/
+third_party/ffmpeg/windows_*/
+third_party/ffmpeg/linux_arm64/
+third_party/.ffmpeg-src/
+/mc
+/mc.exe
+/media-cli
+/dist/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# Editor/IDE
+.idea/
+.vscode/
+
+# build artifacts
+mo
+mo.exe
+mo_master
+mo_master.exe
+
+# tmp config/testing folder
+tmp/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Daily log files
+log/

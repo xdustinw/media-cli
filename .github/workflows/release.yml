@@ -1,0 +1,167 @@
+name: Build and Release
+
+# Triggers:
+#   * push to main            -> rolling "preview" pre-release
+#   * push a tag like v1.2.3  -> versioned release
+#   * "Run workflow" button    -> manual run (Actions tab), same as a main push
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # FFmpeg source commit the vendored linux/amd64 libraries were built from.
+  # Every platform builds FFmpeg from this exact commit so hashes stay identical.
+  FFMPEG_COMMIT: b32f8d1c2377079302d23f82d555d13deda68c57
+
+jobs:
+  # ----------------------------------------------------------------------
+  # One binary per target. media-cli links FFmpeg via cgo, so each target
+  # builds its own static FFmpeg (scripts/build-ffmpeg.sh) on a matching
+  # runner; Windows is cross-compiled from Linux with mingw-w64.
+  # ----------------------------------------------------------------------
+  build:
+    name: build ${{ matrix.asset }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { asset: mc-linux-amd64,       runs-on: ubuntu-latest, goos: linux,   goarch: amd64, cross: false }
+          - { asset: mc-windows-amd64.exe, runs-on: ubuntu-latest, goos: windows, goarch: amd64, cross: true  }
+          - { asset: mc-darwin-arm64,      runs-on: macos-latest,  goos: darwin,  goarch: arm64, cross: false }
+          - { asset: mc-darwin-amd64,      runs-on: macos-13,      goos: darwin,  goarch: amd64, cross: false }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install build tools (Linux / Windows cross)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm pkg-config zlib1g-dev
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            sudo apt-get install -y gcc-mingw-w64-x86-64 libz-mingw-w64-dev
+          fi
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm pkg-config
+
+      - name: Build vendored FFmpeg (${{ matrix.goos }}/${{ matrix.goarch }})
+        env:
+          TARGET_GOOS: ${{ matrix.goos }}
+          TARGET_GOARCH: ${{ matrix.goarch }}
+        run: scripts/build-ffmpeg.sh
+
+      - name: Set version
+        id: v
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=preview+$(git rev-parse --short HEAD).$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test (native targets only)
+        if: matrix.cross == false
+        run: go test ./...
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          [ "${{ matrix.cross }}" = "true" ] && export CC=x86_64-w64-mingw32-gcc
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags "-s -w -X 'github.com/xdustinw/media-cli/cmd.buildVersion=${{ steps.v.outputs.version }}'" \
+            -o "dist/${{ matrix.asset }}" .
+
+      - name: Smoke test (native targets only)
+        if: matrix.cross == false
+        run: "./dist/${{ matrix.asset }} version"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------
+  # Collect the per-target binaries and publish one GitHub Release.
+  # ----------------------------------------------------------------------
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+
+      - name: Assemble dist/
+        run: |
+          mkdir -p dist
+          find staging -type f -exec cp {} dist/ \;
+          # LGPL: ship the FFmpeg notice alongside the binaries.
+          cp THIRD-PARTY-NOTICES.md LICENSE dist/
+          (cd dist && sha256sum * > checksums.txt)
+          ls -l dist
+
+      - name: Release metadata
+        id: meta
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            {
+              echo "tag=${GITHUB_REF#refs/tags/}"
+              echo "name=${GITHUB_REF#refs/tags/}"
+              echo "prerelease=false"
+              echo "version=${GITHUB_REF#refs/tags/}"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "tag=preview"
+              echo "name=preview (latest main)"
+              echo "prerelease=true"
+              echo "version=preview+$(git rev-parse --short HEAD).$(date -u +%Y-%m-%d)"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release notes
+        run: |
+          awk '/^## /{n++; next} n==1{print}' CHANGELOG.md > release-notes.md
+          {
+            printf '\nBuild `%s` — linux/amd64, windows/amd64, darwin/arm64, darwin/amd64\n' \
+              "${{ steps.meta.outputs.version }}"
+            printf '\nBinaries statically link FFmpeg (LGPL-2.1-or-later, no GPL/nonfree parts). '
+            printf 'See `THIRD-PARTY-NOTICES.md` in the assets.\n'
+          } >> release-notes.md
+
+      - name: Rotate preview release
+        if: steps.meta.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete preview --cleanup-tag --yes || true
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          body_path: release-notes.md
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          files: dist/*
+          fail_on_unmatched_files: true

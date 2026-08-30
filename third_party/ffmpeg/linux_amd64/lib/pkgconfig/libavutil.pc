@@ -1,0 +1,14 @@
+prefix=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64
+exec_prefix=${prefix}
+libdir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/lib
+includedir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 61.6.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -lm -lz -latomic -pthread
+Libs.private: 
+Cflags: -I${includedir}
