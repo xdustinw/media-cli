@@ -104,8 +104,8 @@ func TestSetVideoWritesStandardAtoms(t *testing.T) {
 	_, errOut := run(t, Options{
 		Target: clip, Tags: tags, Extensions: []string{".mp4"}, AssumeYes: true,
 	})
-	if strings.Contains(errOut, "will not be stored") {
-		t.Fatalf("artist/comment are standard fields, should not warn:\n%s", errOut)
+	if strings.Contains(errOut, "freeform") {
+		t.Fatalf("artist/comment are standard fields, should stay as ilst atoms:\n%s", errOut)
 	}
 
 	// Written as iTunes ilst atoms (©ART/©cmt) — no mdta freeform box needed —
@@ -118,16 +118,24 @@ func TestSetVideoWritesStandardAtoms(t *testing.T) {
 	}
 }
 
-func TestSetVideoWarnsOnNonStandardKey(t *testing.T) {
+// A non-standard key on MP4 is written via the freeform mdta box and does
+// persist; the command notes the fallback rather than dropping it.
+func TestSetVideoNonStandardKeyStoredAsFreeform(t *testing.T) {
 	root := t.TempDir()
 	clip := sampleMP4(t, root)
 
-	tags, _ := tag.Parse("rating=3")
+	tags, _ := tag.Parse("rating=3,tags=holiday")
 	_, errOut := run(t, Options{
 		Target: clip, Tags: tags, Extensions: []string{".mp4"}, AssumeYes: true,
 	})
-	if !strings.Contains(errOut, "rating") || !strings.Contains(errOut, "will not be stored") {
-		t.Fatalf("expected a drop warning for 'rating' on mp4:\n%s", errOut)
+	if !strings.Contains(errOut, "freeform") {
+		t.Fatalf("expected a freeform-fallback note for non-standard keys:\n%s", errOut)
+	}
+	if v, err := ffmpeg.ReadTag(clip, "rating"); err != nil || v != "3" {
+		t.Fatalf("rating read back as %q, %v (should persist via mdta)", v, err)
+	}
+	if v, err := ffmpeg.ReadTag(clip, "tags"); err != nil || v != "holiday" {
+		t.Fatalf("tags read back as %q, %v", v, err)
 	}
 }
 

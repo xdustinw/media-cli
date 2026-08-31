@@ -77,7 +77,7 @@ func TestListBasic(t *testing.T) {
 		`"sub/":`,              // nested folder key
 		"small.jpg",            // file listed under sub/ by basename
 		"big.png", "notes.txt", // root-level files
-		"{filename,size,mc.hash,rating,artist,comment}:", // flat tabular rows
+		"{filename,size,artist,comment}:", // flat tabular rows
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
@@ -115,7 +115,9 @@ func TestListSummaryOnStderr(t *testing.T) {
 	}
 }
 
-func TestListImageHashColumn(t *testing.T) {
+// mc.hash is not a default column, but --meta=mc.hash brings it back, read from
+// the imgmeta record for images.
+func TestListMetaHashColumn(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "pic.png")
 	writePNG(t, src, 40, 40)
@@ -125,9 +127,14 @@ func TestListImageHashColumn(t *testing.T) {
 	}
 	_ = os.Remove(src)
 
-	got := run(t, Options{Root: root, Format: render.CSV})
-	if !strings.Contains(got, "deadbeefdeadbeefdeadbeefdeadbeef") {
-		t.Fatalf("mc.hash from imgmeta not shown for image:\n%s", got)
+	// Default output omits it.
+	if got := run(t, Options{Root: root, Format: render.CSV}); strings.Contains(got, "deadbeef") {
+		t.Fatalf("mc.hash should not be a default column:\n%s", got)
+	}
+	// --meta=mc.hash adds it back.
+	got := run(t, Options{Root: root, Format: render.CSV, Meta: []string{"mc.hash"}})
+	if !strings.Contains(got, "mc.hash") || !strings.Contains(got, "deadbeefdeadbeefdeadbeefdeadbeef") {
+		t.Fatalf("--meta=mc.hash not shown for image:\n%s", got)
 	}
 }
 

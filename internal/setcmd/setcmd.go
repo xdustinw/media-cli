@@ -117,11 +117,15 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
-	// MP4/MOV metadata is written as iTunes-style atoms so Windows can read it;
-	// keys outside that vocabulary are silently dropped by the muxer. Warn once.
-	if dropped := unsupportedMP4Keys(targets, o.Tags); len(dropped) > 0 {
-		fmt.Fprintf(o.Stderr, "  ! MP4/MOV keeps only standard fields; %s will not be stored on those files\n",
-			strings.Join(dropped, ", "))
+	// MP4/MOV metadata is normally written as iTunes-style atoms so Windows
+	// Explorer and QuickTime read it, but that only keeps a fixed set of
+	// standard keys. When a non-standard key is being set, that file's MP4/MOV
+	// metadata is written as the freeform "mdta" box instead so nothing is lost.
+	freeform := freeformKeys(o.Tags)
+	if len(freeform) > 0 && anyMP4Target(targets) {
+		fmt.Fprintf(o.Stderr, "  note: %s %s non-standard; MP4/MOV metadata will be written as freeform "+
+			"(read by mc / ffmpeg / QuickTime, may not show in Windows Explorer)\n",
+			strings.Join(freeform, ", "), plural(len(freeform)))
 	}
 
 	if !o.AssumeYes {
@@ -141,12 +145,13 @@ func Run(ctx context.Context, o Options) error {
 	}
 
 	applyStart := time.Now()
+	movFreeform := len(freeform) > 0
 	var applyErrs int
 	for _, f := range targets {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := apply(f, o.Tags); err != nil {
+		if err := apply(f, o.Tags, movFreeform); err != nil {
 			applyErrs++
 			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f.Path), err)
 			continue
@@ -165,7 +170,8 @@ func Run(ctx context.Context, o Options) error {
 
 // apply writes the tags into a sibling temp file, then moves it over the
 // original. Video is remuxed with stream copy; images keep their pixel data.
-func apply(f *mediainfo.File, tags tag.Set) error {
+// movFreeform switches MP4/MOV metadata to the freeform mdta box (see Run).
+func apply(f *mediainfo.File, tags tag.Set, movFreeform bool) error {
 	tmp := filepath.Join(filepath.Dir(f.Abs),
 		fmt.Sprintf(".mc-set-%d%s", os.Getpid(), filepath.Ext(f.Abs)))
 	_ = os.Remove(tmp)
@@ -173,9 +179,9 @@ func apply(f *mediainfo.File, tags tag.Set) error {
 	var werr error
 	switch f.Kind {
 	case media.KindVideo:
-		// Write standard iTunes-style atoms (no mdta freeform box) so the
-		// fields are visible to Windows Explorer and QuickTime.
-		werr = ffmpeg.WriteTags(f.Abs, tmp, tags.Keys(), tags.Values(), false)
+		// Standard keys go to iTunes-style atoms (Windows/QuickTime read them);
+		// a non-standard key forces the freeform mdta box so it is not dropped.
+		werr = ffmpeg.WriteTags(f.Abs, tmp, tags.Keys(), tags.Values(), movFreeform)
 	case media.KindImage:
 		if !imgmeta.Supported(f.Abs) {
 			return fmt.Errorf("setting metadata on %s images is not supported", filepath.Ext(f.Abs))
@@ -196,10 +202,11 @@ func apply(f *mediainfo.File, tags tag.Set) error {
 	return nil
 }
 
-// mp4RetainedKeys are the global metadata keys FFmpeg's mp4/mov muxer keeps in
-// the iTunes-style ilst atom (see libavformat/movenc.c mov_write_ilst_tag).
-// Anything else is dropped when metadata is not written as freeform mdta.
-var mp4RetainedKeys = map[string]bool{
+// mp4StandardKeys are the global metadata keys FFmpeg's mp4/mov muxer keeps in
+// the iTunes-style ilst atom (see libavformat/movenc.c mov_write_ilst_tag), the
+// ones Windows Explorer and QuickTime read. Any other key needs the freeform
+// mdta box to survive the remux.
+var mp4StandardKeys = map[string]bool{
 	"title": true, "artist": true, "album_artist": true, "composer": true,
 	"album": true, "date": true, "comment": true, "genre": true,
 	"copyright": true, "grouping": true, "lyrics": true, "description": true,
@@ -207,10 +214,24 @@ var mp4RetainedKeys = map[string]bool{
 	"keywords": true, "encoding_tool": true,
 }
 
-// unsupportedMP4Keys returns the sorted, de-duplicated tag keys that would be
-// lost when written onto any MP4/MOV file in targets.
-func unsupportedMP4Keys(targets []*mediainfo.File, tags tag.Set) []string {
-	hasMP4 := false
+// freeformKeys returns the sorted, de-duplicated tag keys that are not standard
+// MP4/MOV fields — their presence forces the freeform mdta metadata box.
+func freeformKeys(tags tag.Set) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range tags {
+		k := strings.ToLower(p.Key)
+		if !mp4StandardKeys[k] && !seen[k] {
+			seen[k] = true
+			out = append(out, p.Key)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// anyMP4Target reports whether any target is an MP4/MOV-family video.
+func anyMP4Target(targets []*mediainfo.File) bool {
 	for _, f := range targets {
 		if f.Kind != media.KindVideo {
 			continue
@@ -218,24 +239,17 @@ func unsupportedMP4Keys(targets []*mediainfo.File, tags tag.Set) []string {
 		c := f.ContainerFormat()
 		if strings.Contains(c, "mp4") || strings.Contains(c, "mov") ||
 			strings.Contains(c, "m4a") || strings.Contains(c, "3gp") {
-			hasMP4 = true
-			break
+			return true
 		}
 	}
-	if !hasMP4 {
-		return nil
+	return false
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "is"
 	}
-	var out []string
-	seen := map[string]bool{}
-	for _, p := range tags {
-		k := strings.ToLower(p.Key)
-		if !mp4RetainedKeys[k] && !seen[k] {
-			seen[k] = true
-			out = append(out, p.Key)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return "are"
 }
 
 func summaryErr(scanErrs int) error {

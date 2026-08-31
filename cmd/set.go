@@ -28,10 +28,12 @@ it ('artist="Doe, Jane"'). Video files are remuxed with stream copy (pixels and
 streams untouched); image tags are stored in the file's native text area (PNG
 tEXt, JPEG COM, GIF comment, WebP chunk).
 
-Video metadata is written as standard MP4/MOV atoms so it shows up in Windows
-Explorer and QuickTime — use canonical field names like artist, comment, title,
-genre and date. Keys the MP4 muxer does not recognise (e.g. a bare rating on a
-video) are not retained and a warning is printed.
+On MP4/MOV, standard fields (artist, comment, title, genre, date, ...) are
+written as the classic iTunes atoms that Windows Explorer and QuickTime read.
+Setting any non-standard key (rating, tags, custom) switches that file's MP4/MOV
+metadata to the freeform box so nothing is dropped — it is still read by
+mc/ffmpeg/QuickTime but may not show in Windows Explorer. MKV and images take
+any key.
 
 You are strongly encouraged to pass --select — without it every media file in
 the folder is updated. The change is previewed and confirmed (unless -y).`,

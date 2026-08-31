@@ -131,30 +131,31 @@ mc list [folder] [--meta=<fields>] [--select=<expr>] [--sort-by=<keys>] [--forma
 
 Lists `[folder]` (default: current directory). Only that folder's own files are
 listed; pass `-r` / `--recursive` to descend into subfolders. Each file row is
-`filename`, `size`, `mc.hash`, `rating`, `artist`, `comment` (+ any `--meta`
-columns). `toon` and `json` nest the rows under their folders; `csv` is one flat
-table with absolute paths.
+`filename`, `size`, `artist`, `comment` (+ any `--meta` columns). `mc.hash` and
+`rating` are **not** shown by default — they're usually empty; add them back with
+`--meta=mc.hash,rating`. `toon` and `json` nest the rows under their folders;
+`csv` is one flat table with absolute paths.
 
 ```bash
 mc list ~/Photos
-mc list -r ~/Photos --meta=make,model,DateTimeOriginal
+mc list -r ~/Photos --meta=mc.hash,rating,make,model
 mc list -r ~/Videos --select='rating>=4 and size>1g' --sort-by='rating desc, size desc'
 mc list -r ~/Photos --format=csv > inventory.csv       # flat, absolute paths
 ```
 
 ```
-$ mc list tmp
+$ mc list tmp --meta=mc.hash,rating
 6 file(s)
 "tmp/":
   "img/":
-    files[2]{filename,size,mc.hash,rating,artist,comment}:
-      photo.jpg,84KB,4358a46e…d7,4,,summer trip
+    files[2]{filename,size,artist,comment,mc.hash,rating}:
+      photo.jpg,84KB,,summer trip,4358a46e…d7,4
   "video/":
-    files[1]{filename,size,mc.hash,rating,artist,comment}:
-      clip.mp4,97MB,8f9b6e8b…37,,Adam Yu,
+    files[1]{filename,size,artist,comment,mc.hash,rating}:
+      clip.mp4,97MB,Adam Yu,,8f9b6e8b…37,
 ```
 
-- `--meta` – extra metadata columns, comma separated.
+- `--meta` – extra metadata columns, comma separated (e.g. `mc.hash`, `rating`, `title`).
 - `--select` – keep matching files. Fields: `name`, `path`, `size`,
   `modifiedAt`, `rating`, `kind`, `format`, `artist`, `comment`, or any metadata
   key. Operators `= != > < >= <=`; `=` matches case-insensitively and supports
@@ -189,11 +190,14 @@ mc set 'artist="Doe, Jane"' ~/Photos --select='artist=old-name'   # quote to kee
 - Video files are **remuxed with stream copy** — pixels and streams are
   untouched, so the `mc hash` value does not change; only the container metadata
   is rewritten.
-- Video metadata is written as standard MP4/MOV atoms (`©nam`, `©ART`, `©cmt`,
-  …), so **Windows Explorer and QuickTime show it**. Use canonical field names —
-  `artist`, `comment`, `title`, `genre`, `date`. Keys the MP4 muxer doesn't
-  recognise (e.g. a bare `rating` on a video) aren't retained; `mc set` warns
-  when that happens.
+- On MP4/MOV, when **every** key you set is a standard field (`artist`, `comment`,
+  `title`, `genre`, `date`, `album`, …) the metadata is written as the classic
+  `©nam` / `©ART` / `©cmt` atoms that **Windows Explorer and QuickTime show**.
+  As soon as a **non-standard** key is involved (`rating`, `tags`, anything
+  custom) that file's MP4/MOV metadata switches to the freeform `mdta` box so
+  nothing is dropped — it round-trips through `mc list` / `mc info` / ffmpeg and
+  QuickTime, but may not appear in Windows Explorer. `mc set` prints a note when
+  it makes that switch. MKV and image formats take any key with no caveat.
 - Image tags go into the file's native text area (PNG `tEXt`, JPEG `COM`, GIF
   comment, WebP chunk), the same store `mc.hash` uses. `mc list` / `mc info`
   read them back.

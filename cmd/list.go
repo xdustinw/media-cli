@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/xdustinw/media-cli/internal/config"
 	"github.com/xdustinw/media-cli/internal/listcmd"
 	"github.com/xdustinw/media-cli/internal/render"
 )
@@ -23,14 +22,15 @@ var listCmd = &cobra.Command{
 	Short: "List media files in a folder with size and metadata",
 	Long: `list scans <folder> (default: current directory). Only that folder's own
 files are listed; pass -r/--recursive to descend into subdirectories. Each file
-row is: filename, size, mc.hash, rating, authors, tags.
+row is: filename, size, artist, comment. mc.hash and rating are not shown by
+default (usually empty) — add them with --meta=mc.hash,rating.
 toon/json nest the rows under their folders; csv is one flat table (absolute paths).
 
-  --meta      extra metadata columns, comma separated (e.g. --meta=title,make,model)
+  --meta      extra metadata columns, comma separated (e.g. --meta=mc.hash,rating,title)
   --select    keep only matching files, e.g.
               --select='name=sample* and rating>=4 and size>1g and modifiedAt>2026-08-01'
-              fields: name, path, size, rating, modifiedAt, kind, format, authors,
-              tags, or any metadata key. ops: = != > < >= <=  ( = is a
+              fields: name, path, size, rating, modifiedAt, kind, format, artist,
+              comment, or any metadata key. ops: = != > < >= <=  ( = is a
               case-insensitive * / ? wildcard match ).
               combine with 'and' / 'or'.
   --sort-by   comma separated keys with optional 'desc', e.g.
@@ -44,7 +44,6 @@ toon/json nest the rows under their folders; csv is one flat table (absolute pat
 		}
 		return listcmd.Run(cmd.Context(), listcmd.Options{
 			Root:      argOr(args, 0, "."),
-			HashKey:   vip.GetString(config.KeyHashMetaKey),
 			Meta:      splitCSVFlag(flagListMeta),
 			SortBy:    flagListSortBy,
 			Select:    flagListSelect,

@@ -57,10 +57,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     as each file is processed, so progress shows on large folders.
 - **`mc list [folder] [flags]`**: folder listing (folder defaults to the current
   directory; only its own files unless `-r` / `--recursive` is passed). Each file
-  row is
-  `filename`, `size` (human readable), `mc.hash`, `rating`, `artist`, `comment`.
-  `mc.hash` is read from container metadata (video) or the imgmeta record
-  (images).
+  row is `filename`, `size` (human readable), `artist`, `comment`. `mc.hash` and
+  `rating` are not shown by default (usually empty) — add them back with
+  `--meta=mc.hash,rating`.
   - `--format=toon|json` nests the rows under their folders
     (`"tmp/" → "video/" → files[N]{...}`); `--format=csv` is one flat table with
     absolute paths.
@@ -77,11 +76,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Video is remuxed with stream copy (pixels/streams and the `mc.hash` value
   unchanged, only container metadata rewritten); image tags go into the same
   native text store `mc.hash` uses (and shares the video remux's parser/probe
-  skips). On MP4/MOV the metadata is written as standard iTunes-style atoms
-  (`©nam`/`©ART`/`©cmt`/…) so Windows Explorer and QuickTime display it — use
-  canonical field names (`artist`, `comment`, `title`, `genre`, `date`); keys
-  the MP4 muxer does not recognise are not retained and `mc set` warns.
-  Values may contain spaces; a `"…"` wrap keeps a comma inside a value.
+  skips). On MP4/MOV, when every key is a standard field (`artist`, `comment`,
+  `title`, `genre`, `date`, …) the metadata is written as iTunes-style atoms
+  (`©nam`/`©ART`/`©cmt`/…) that Windows Explorer and QuickTime read; setting any
+  non-standard key (`rating`, `tags`, custom) switches that file to the freeform
+  `mdta` box so nothing is dropped (still read by mc/ffmpeg/QuickTime, may not
+  show in Windows Explorer) — `mc set` prints a note. MKV and images take any
+  key. Values may contain spaces; a `"…"` wrap keeps a comma inside a value.
   Only files matched by `--select` are probed deeply, and only when the filter
   needs it. Previews `key: <current> -> <new>` per file and confirms unless
   `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
