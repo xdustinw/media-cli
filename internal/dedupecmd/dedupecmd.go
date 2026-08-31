@@ -78,8 +78,11 @@ type Options struct {
 	Confirm   func(prompt string) (bool, error)
 	// Ask presents one duplicate set and returns the 1-based index of the file
 	// to keep, or 0 to leave the whole set alone.
-	Ask    func(prompt string, count int) (int, error)
-	Logger *slog.Logger
+	Ask func(prompt string, count int) (int, error)
+	// PreHash fingerprints and renames the given unhashed files in place (see
+	// hashcmd.HashInPlace). When nil, unhashed files are grouped by name.
+	PreHash func(ctx context.Context, files []string) (int, error)
+	Logger  *slog.Logger
 }
 
 type fileInfo struct {
@@ -90,7 +93,7 @@ type fileInfo struct {
 }
 
 type dupSet struct {
-	hash  string
+	key   string // short hash, or (fallback) the shared file name
 	files []fileInfo
 	keep  int // index into files; -1 => skip this set
 }
@@ -111,47 +114,92 @@ func Run(ctx context.Context, o Options) error {
 		return fmt.Errorf("--select: %w", err)
 	}
 
-	// Gather every hash-named file across the folders.
-	byHash := map[string][]fileInfo{}
-	seen := map[string]struct{}{}
-	for _, folder := range o.Folders {
-		files, ferr := media.WalkFiles(ctx, folder, o.Recursive)
-		if ferr != nil {
-			return fmt.Errorf("reading %s: %w", folder, ferr)
+	// Gather every file across the folders (with its filesystem facts).
+	gather := func() ([]fileInfo, error) {
+		var all []fileInfo
+		seen := map[string]struct{}{}
+		for _, folder := range o.Folders {
+			files, ferr := media.WalkFiles(ctx, folder, o.Recursive)
+			if ferr != nil {
+				return nil, fmt.Errorf("reading %s: %w", folder, ferr)
+			}
+			base := media.DisplayBase(folder)
+			for _, f := range files {
+				if _, dup := seen[f]; dup {
+					continue
+				}
+				facts, e := media.StatFacts(f)
+				if e != nil {
+					continue
+				}
+				if sel != nil && !sel.Match(facts) {
+					continue
+				}
+				seen[f] = struct{}{}
+				all = append(all, fileInfo{
+					path: f, rel: media.RelTo(base, f), size: facts.Size, modTime: facts.ModTime,
+				})
+			}
 		}
-		base := media.DisplayBase(folder)
-		for _, f := range files {
-			if _, dup := seen[f]; dup {
-				continue
+		return all, nil
+	}
+
+	all, err := gather()
+	if err != nil {
+		return err
+	}
+
+	// Offer to hash the files that carry no short hash.
+	byName := false
+	var noHash []string
+	for _, fi := range all {
+		if media.ShortHashInName(fi.path, hashLen) == "" {
+			noHash = append(noHash, fi.path)
+		}
+	}
+	if len(noHash) > 0 {
+		doHash := o.AssumeYes && o.PreHash != nil
+		if !o.AssumeYes && o.PreHash != nil {
+			doHash = confirmed(o, fmt.Sprintf(
+				"%d file(s) have no content hash. Hash them first? [y/N]  (n = group by file name) ", len(noHash)))
+		}
+		if doHash {
+			n, herr := o.PreHash(ctx, noHash)
+			if herr != nil {
+				return fmt.Errorf("hashing unhashed files: %w", herr)
 			}
-			h := media.ShortHashInName(f, hashLen)
-			if h == "" {
-				continue
+			fmt.Fprintf(o.Stderr, "  hashed %d file(s)\n", n)
+			if all, err = gather(); err != nil {
+				return err
 			}
-			facts, e := media.StatFacts(f)
-			if e != nil {
-				continue
-			}
-			if sel != nil && !sel.Match(facts) {
-				continue
-			}
-			seen[f] = struct{}{}
-			byHash[h] = append(byHash[h], fileInfo{
-				path: f, rel: media.RelTo(base, f), size: facts.Size, modTime: facts.ModTime,
-			})
+		} else {
+			byName = true
+			fmt.Fprintln(o.Stderr, "  grouping by file name (unhashed files not fingerprinted)")
 		}
 	}
 
-	// Keep only the sets with more than one copy.
+	// Group into duplicate sets.
+	groups := map[string][]fileInfo{}
+	for _, fi := range all {
+		key := media.ShortHashInName(fi.path, hashLen)
+		if key == "" {
+			if !byName {
+				continue
+			}
+			key = "name:" + filepath.Base(fi.path)
+		}
+		groups[key] = append(groups[key], fi)
+	}
+
 	var sets []dupSet
-	for h, fs := range byHash {
+	for k, fs := range groups {
 		if len(fs) < 2 {
 			continue
 		}
 		sort.Slice(fs, func(i, j int) bool { return fs[i].path < fs[j].path })
-		sets = append(sets, dupSet{hash: h, files: fs, keep: -1})
+		sets = append(sets, dupSet{key: strings.TrimPrefix(k, "name:"), files: fs, keep: -1})
 	}
-	sort.Slice(sets, func(i, j int) bool { return sets[i].hash < sets[j].hash })
+	sort.Slice(sets, func(i, j int) bool { return sets[i].key < sets[j].key })
 
 	if len(sets) == 0 {
 		fmt.Fprintln(o.Stdout, "No duplicate sets found.")
@@ -196,10 +244,10 @@ func Run(ctx context.Context, o Options) error {
 	doc := &toon.Document{}
 	doc.AddField("method", o.Method.label())
 	doc.AddField("duplicate-sets", fmt.Sprint(len(sets)))
-	tbl := toon.Table{Name: "delete", Columns: []string{"hash", "keep", "delete"}}
+	tbl := toon.Table{Name: "delete", Columns: []string{"set", "keep", "delete"}}
 	for _, d := range dels {
 		s := sets[d.set]
-		tbl.Rows = append(tbl.Rows, []string{s.hash, s.files[s.keep].rel, s.files[d.file].rel})
+		tbl.Rows = append(tbl.Rows, []string{s.key, s.files[s.keep].rel, s.files[d.file].rel})
 	}
 	doc.AddTable(tbl)
 	fmt.Fprint(o.Stdout, doc.String())
@@ -235,7 +283,7 @@ func Run(ctx context.Context, o Options) error {
 		removed++
 		bytes += f.size
 		fmt.Fprintf(o.Stdout, "  ✓ deleted %s\n", f.rel)
-		log.Info("dedupe", "deleted", f.path, "hash", sets[d.set].hash)
+		log.Info("dedupe", "deleted", f.path, "key", sets[d.set].key)
 	}
 
 	fmt.Fprintln(o.Stderr, media.Summary(removed, bytes, time.Since(start)))
@@ -245,10 +293,19 @@ func Run(ctx context.Context, o Options) error {
 	return nil
 }
 
+// confirmed runs o.Confirm; a nil callback or any error counts as "no".
+func confirmed(o Options, prompt string) bool {
+	if o.Confirm == nil {
+		return false
+	}
+	ok, err := o.Confirm(prompt)
+	return ok && err == nil
+}
+
 // askKeep renders one set and asks which copy to keep (0 => skip the set).
 func askKeep(o Options, s dupSet) (int, error) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\nduplicate set %s — %d copies:\n", s.hash, len(s.files))
+	fmt.Fprintf(&b, "\nduplicate set %s — %d copies:\n", s.key, len(s.files))
 	for i, f := range s.files {
 		fmt.Fprintf(&b, "  %d) %s   (%s, %s)\n", i+1, f.rel,
 			mediainfo.HumanSize(f.size), f.modTime.Format("2006-01-02"))

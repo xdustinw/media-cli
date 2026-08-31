@@ -203,6 +203,7 @@ no GPL/nonfree parts. Compliance is handled by:
 | `internal/listcmd/`, `internal/infocmd/` | `mc list` / `mc info` workflows |
 | `internal/copycmd/` | `mc copy` / `mc move`: name-hash duplicate resolution |
 | `internal/dedupecmd/` | `mc dedupe`: delete duplicate hash-named files across folders |
+| `internal/deletecmd/` | `mc delete`: remove files matching a required `--select` |
 | `internal/mediainfo/` | filesystem + probe + imgmeta → one record; rating/authors/tags derivation |
 | `internal/query/` | `--select` / `--sort-by` parser and evaluator |
 | `internal/tag/` | `mc set` `key=value,…` parser |

@@ -181,6 +181,44 @@ func TestSelectNarrowsSets(t *testing.T) {
 	}
 }
 
+// Declining the prehash offer falls back to grouping by file name.
+func TestUnhashedGroupsByNameWhenDeclined(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a", "photo.jpg"), "X", time.Time{})
+	write(t, filepath.Join(root, "b", "photo.jpg"), "X", time.Time{})
+	write(t, filepath.Join(root, "b", "unrelated.jpg"), "Y", time.Time{})
+
+	_, errOut, err := run(t, Options{
+		Folders: []string{root}, Method: MethodLongerName,
+		PreHash: func(context.Context, []string) (int, error) { t.Fatal("PreHash must not run"); return 0, nil },
+		Confirm: func(p string) (bool, error) {
+			if strings.Contains(p, "Hash them first") {
+				return false, nil
+			}
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut, "grouping by file name") {
+		t.Fatalf("expected the by-name notice:\n%s", errOut)
+	}
+	// One of the two "photo.jpg" copies is gone; the unrelated file stays.
+	surv := 0
+	for _, p := range []string{"a/photo.jpg", "b/photo.jpg"} {
+		if exists(filepath.Join(root, filepath.FromSlash(p))) {
+			surv++
+		}
+	}
+	if surv != 1 {
+		t.Fatalf("expected 1 surviving photo.jpg, got %d", surv)
+	}
+	if !exists(filepath.Join(root, "b", "unrelated.jpg")) {
+		t.Fatal("unrelated.jpg must not be touched")
+	}
+}
+
 func TestConfirmAbortDeletesNothing(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "a.cccccc.jpg"), "C", time.Time{})

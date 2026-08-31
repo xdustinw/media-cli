@@ -2,13 +2,16 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/xdustinw/media-cli/internal/config"
 	"github.com/xdustinw/media-cli/internal/copycmd"
+	"github.com/xdustinw/media-cli/internal/hashcmd"
 )
 
 var (
@@ -92,6 +95,9 @@ func runCopyMove(move bool) func(*cobra.Command, []string) error {
 				}
 				a := strings.ToLower(strings.TrimSpace(line))
 				return a == "y" || a == "yes", nil
+			},
+			PreHash: func(ctx context.Context, files []string) (int, error) {
+				return hashcmd.HashInPlace(ctx, files, vip.GetInt(config.KeyHashNameLen), slog.Default())
 			},
 		})
 	}

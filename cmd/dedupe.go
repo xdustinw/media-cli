@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/xdustinw/media-cli/internal/config"
 	"github.com/xdustinw/media-cli/internal/dedupecmd"
+	"github.com/xdustinw/media-cli/internal/hashcmd"
 )
 
 var (
@@ -65,6 +68,9 @@ anything is removed, unless -y.`,
 				}
 				a := strings.ToLower(strings.TrimSpace(line))
 				return a == "y" || a == "yes", nil
+			},
+			PreHash: func(ctx context.Context, files []string) (int, error) {
+				return hashcmd.HashInPlace(ctx, files, vip.GetInt(config.KeyHashNameLen), slog.Default())
 			},
 			Ask: func(prompt string, count int) (int, error) {
 				for {

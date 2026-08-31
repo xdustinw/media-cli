@@ -68,6 +68,7 @@ the old `mc.exe` as `mc-<version>.exe`).
 | [`mc set`](#mc-set) | Write chosen metadata onto matching files in a folder |
 | [`mc copy`](#mc-copy--mc-move) / [`mc move`](#mc-copy--mc-move) | Bring files into a folder, resolving name-hash duplicates |
 | [`mc dedupe`](#mc-dedupe) | Delete duplicate copies of hash-named files across folders |
+| [`mc delete`](#mc-delete) | Delete files under folders that match a `--select` filter |
 | [`mc info`](#mc-info) | Dump everything known about one file |
 | [`mc update`](#mc-update) | Update `mc` to the latest release |
 | [`mc version`](#mc-version) | Print version and bundled-FFmpeg info |
@@ -173,7 +174,7 @@ $ mc list tmp --meta=mc.hash,rating
 - `-r` / `--recursive` – descend into subfolders (off by default).
 
 Every command that walks files (`hash`, `list`, `set`, `info`, `copy`, `move`,
-`dedupe`) prints a one-line summary to stderr when it finishes, e.g.
+`dedupe`, `delete`) prints a one-line summary to stderr when it finishes, e.g.
 `processed 12 file(s) in 3.4s (28.1 MB/s)` (runs over a minute read as
 `2m 5s`).
 
@@ -245,9 +246,14 @@ mc copy ~/incoming ~/library --select='name=IMG_*'
 
 **`--select`** filters the source files (`name`, `path`, `ext`, `size`,
 `modifiedAt`, `kind`); you're shown the matches and asked to confirm before the
-hash compare, unless `-y`. `-y` also skips the final confirmation. A source file
-whose destination path is already taken by a *non-duplicate* is skipped (never
-overwritten). The full plan is shown as a TOON preview before anything happens.
+hash compare, unless `-y`. `-y` also skips the final confirmation.
+
+**Unhashed files.** When files in the sources or the target have no
+`.<6-hex>` slot, `mc copy` / `mc move` offers to hash them first (`mc hash`,
+in place). Decline and the comparison falls back to **relative path** — a
+source file is a duplicate only when `<target>/<rel>` already exists. `-y`
+hashes them all automatically. The full plan is shown as a TOON preview before
+anything happens.
 
 ### `mc dedupe`
 
@@ -272,8 +278,28 @@ mc dedupe ~/Photos ~/Backup -m newer -y       # keep the newest, no prompts
 mc dedupe ~/Photos --select='name=IMG_*' -m longer-name
 ```
 
+Files without a `.<6-hex>` slot are offered to `mc hash` first (or, with `-y`,
+hashed automatically); decline and they're grouped by **file name** instead.
 The full list of deletions is shown as a TOON preview and confirmed before
 anything is removed, unless `-y`.
+
+### `mc delete`
+
+```
+mc delete [folder ...] --select=<expr> [-y] [--nr]
+```
+
+Deletes the files under the given folders (default: current directory) that
+match `--select` — which is **required**; it is the only thing that decides
+what goes. Folders are scanned recursively unless `--nr`.
+
+```bash
+mc delete ~/incoming --select='name=IMG_2* or name=IMG_3*'
+mc delete . --select='ext=tmp and size<1k'
+```
+
+The matched files are shown as a TOON preview and confirmed before deletion,
+unless `-y`.
 
 ### `mc info`
 

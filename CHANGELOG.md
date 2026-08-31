@@ -103,18 +103,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   leave the target, keep the source; `move` does not delete a skipped source),
   `overwrite` (copy source bytes over the matching target file), or `keep-both`
   (bring the source in too, at `<target>/<rel>`). `--select` narrows the source
-  set with a confirmation before the hash compare. `-y` skips confirmations.
-  Non-duplicate path collisions are skipped, never overwritten. The plan is
-  shown as a TOON preview first. New package `internal/copycmd`;
-  `media.CopyFile` / `media.MoveFile` / `media.WalkFiles` / `media.DiscoverMany`
-  / `media.Facts`.
+  set with a confirmation before the hash compare. When source/target files
+  have no short hash, `mc copy`/`mc move` offers to hash them first (`-y` does
+  it automatically); declined, the comparison falls back to relative path. `-y`
+  skips confirmations. Non-duplicate path collisions are skipped, never
+  overwritten. The plan is shown as a TOON preview first. New package
+  `internal/copycmd`; `media.CopyFile` / `media.MoveFile` / `media.WalkFiles` /
+  `media.DiscoverMany` / `media.Facts`; `hashcmd.HashInPlace`.
 - **`mc dedupe <folder> [<folder> ...] [-m <method>] [--select=<expr>] [-y] [--nr]`**:
   groups files by the `.<6-hex>` short hash in their name (from `mc hash`, no
   metadata read) across the folders and deletes all but one copy of each set.
   Folders are scanned recursively unless `--nr`. `-m` / `--method` chooses the
   keeper: `interactive` (default — pick per set, or skip it), `longer-name`,
-  `newer`, or `older`. `--select` filters the files. The deletions are shown as
-  a TOON preview and confirmed unless `-y`. New package `internal/dedupecmd`.
+  `newer`, or `older`. `--select` filters the files. Files without a short hash
+  are offered to `mc hash` first (`-y` hashes them); declined, they are grouped
+  by file name. The deletions are shown as a TOON preview and confirmed unless
+  `-y`. New package `internal/dedupecmd`.
+- **`mc delete [folder ...] --select=<expr> [-y] [--nr]`**: deletes the files
+  under the folders (default: the current directory) that match `--select` —
+  which is required. Folders are scanned recursively unless `--nr`. The matched
+  files are shown as a TOON preview and confirmed unless `-y`. New package
+  `internal/deletecmd`.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
   modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail

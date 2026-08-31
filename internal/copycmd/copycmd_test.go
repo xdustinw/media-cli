@@ -190,22 +190,71 @@ func TestNonRecursiveSource(t *testing.T) {
 	}
 }
 
-func TestPlainPathCollisionSkipped(t *testing.T) {
+// When files have no hash and the user declines to hash them, the comparison
+// falls back to relative path.
+func TestUnhashedFallsBackToPathCompare(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	dst := filepath.Join(root, "dst")
-	write(t, filepath.Join(src, "note.txt"), "SRC") // no short hash
-	write(t, filepath.Join(dst, "note.txt"), "TGT")
+	write(t, filepath.Join(src, "a.txt"), "SRC-A") // path duplicate
+	write(t, filepath.Join(src, "b.txt"), "SRC-B") // new
+	write(t, filepath.Join(dst, "a.txt"), "TGT-A")
 
-	_, errOut, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true})
-	if err == nil {
-		t.Fatal("expected an error for the skipped conflict")
+	// PreHash present, but the user says "no".
+	_, errOut, err := run(t, Options{
+		Sources: []string{src}, Target: dst, Move: true,
+		PreHash: func(context.Context, []string) (int, error) { t.Fatal("PreHash must not run"); return 0, nil },
+		Confirm: func(p string) (bool, error) {
+			if strings.Contains(p, "Hash them first") {
+				return false, nil
+			}
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(errOut, "already at the destination") {
-		t.Fatalf("missing conflict note:\n%s", errOut)
+	if !strings.Contains(errOut, "comparing by relative path") {
+		t.Fatalf("expected the path-compare notice:\n%s", errOut)
 	}
-	if read(t, filepath.Join(dst, "note.txt")) != "TGT" {
-		t.Fatal("a path collision must never overwrite")
+	if read(t, filepath.Join(dst, "a.txt")) != "TGT-A" {
+		t.Fatal("a.txt is a path duplicate; skip-duplicate must keep the target")
+	}
+	if !exists(filepath.Join(src, "a.txt")) {
+		t.Fatal("move + skip-duplicate must leave the source path-duplicate in place")
+	}
+	if read(t, filepath.Join(dst, "b.txt")) != "SRC-B" {
+		t.Fatal("b.txt is not a duplicate and should have moved in")
+	}
+}
+
+// -y hashes the unhashed files via PreHash before comparing.
+func TestUnhashedAutoHashedUnderY(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "clip.mp4"), "DATA")
+
+	called := false
+	_, _, err := run(t, Options{
+		Sources: []string{src}, Target: dst, AssumeYes: true,
+		PreHash: func(_ context.Context, files []string) (int, error) {
+			called = true
+			// pretend we hashed: rename in place with a fake slot
+			for _, f := range files {
+				_ = os.Rename(f, f[:len(f)-len(".mp4")]+".abc123.mp4")
+			}
+			return len(files), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("-y should have invoked PreHash")
+	}
+	if !exists(filepath.Join(dst, "clip.abc123.mp4")) {
+		t.Fatal("the hashed file should have been copied in under its new name")
 	}
 }
 
