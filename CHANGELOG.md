@@ -22,14 +22,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `libswresample`. There is deliberately no H.264/H.265 encoder (would need
   GPL `libx264`/`libx265`); the binary grew ~10 MB for the added components.
 - **`mc hash [file|folder ...] [-m <method>] [--select=<expr>] [-y] [-f] [--nr]`**:
-  fingerprints each video (`.mp4 .mkv .mov .m4v .webm .avi`) and image
-  (`.jpg .jpeg .jpe .jfif .png .apng .gif .webp`) file and renames it to
+  fingerprints each video (`.mp4 .mkv .mov .m4v .webm .avi .wmv .asf .flv .mpg
+  .mpeg .ts .m2ts .3gp .ogv .vob …`) and image (`.jpg .jpeg .jpe .jfif .png
+  .apng .gif .webp`) file and renames it to
   `<name>.<first 6 of hash>.<ext>` (replacing a short hash already in the name).
   Takes one or more files/folders (default: the current directory); folders are
   scanned **recursively unless `--nr` is passed** (the old `-r` opt-in flag is
   gone — recursive is now the default).
   - `-m` / `--method` selects the fingerprint. The default (no `-m`) tries
-    `ffmpeg-10m` and falls back to `md5-10m` for any file ffmpeg can't read.
+    `ffmpeg-10m` and falls back to `md5-10m` for any file ffmpeg can't read
+    (e.g. an unusual `.wmv`). The recognised video extension list grew to cover
+    `.wmv .asf .flv .mpg .mpeg .m2v .ts .m2ts .mts .3gp .3g2 .ogv .vob .mxf .rm
+    .rmvb .divx .f4v` (single source of truth: `media.DefaultExtensions()`,
+    which `config` now uses).
     `ffmpeg-10m` md5s the first ~10 MB of the video+audio stream; `ffmpeg` md5s
     the whole stream (or decoded pixels for images) and is the only method that
     also writes the `mc.hash` tag; `md5` / `sha` hash the raw file bytes;

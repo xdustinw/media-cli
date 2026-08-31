@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+
+	"github.com/xdustinw/media-cli/internal/media"
 )
 
 // Keys used across the application. Cobra flags bind to these in the various
@@ -33,10 +35,9 @@ func New() *viper.Viper {
 	v.SetDefault(KeyVerbose, false)
 	v.SetDefault(KeyDebug, false)
 	v.SetDefault(KeyAssumeYes, false)
-	v.SetDefault(KeyMediaExts, []string{
-		".mp4", ".mkv", ".mov", ".m4v", ".webm", ".avi", // video
-		".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".apng", ".gif", ".webp", // images
-	})
+	// The recognised video + image extensions (single source of truth in
+	// package media, so `mc list`/`mc hash`/… and media.KindOf never drift).
+	v.SetDefault(KeyMediaExts, media.DefaultExtensions())
 	v.SetDefault(KeyHashMetaKey, "mc.hash")
 	v.SetDefault(KeyHashNameLen, 6)
 

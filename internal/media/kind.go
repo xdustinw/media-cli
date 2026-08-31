@@ -28,6 +28,9 @@ func (k Kind) String() string {
 var (
 	videoExts = map[string]struct{}{
 		".mp4": {}, ".mkv": {}, ".mov": {}, ".m4v": {}, ".webm": {}, ".avi": {},
+		".wmv": {}, ".asf": {}, ".flv": {}, ".mpg": {}, ".mpeg": {}, ".m2v": {},
+		".ts": {}, ".m2ts": {}, ".mts": {}, ".3gp": {}, ".3g2": {}, ".ogv": {},
+		".vob": {}, ".mxf": {}, ".rm": {}, ".rmvb": {}, ".divx": {}, ".f4v": {},
 	}
 	imageExts = map[string]struct{}{
 		".jpg": {}, ".jpeg": {}, ".jpe": {}, ".jfif": {},
