@@ -15,8 +15,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Vendored FFmpeg** (`third_party/ffmpeg/<goos>_<goarch>/`): statically linked
   libav* built via cgo — no `ffmpeg` binary needed. Only linux/amd64 is checked
   in; `scripts/build-ffmpeg.sh` builds any target (host or cross), fetching the
-  pinned FFmpeg source when `../ref/ffmpeg` is absent. Audio/video use stream
-  copy; a curated set of still-image decoders is enabled for image hashing.
+  pinned FFmpeg source when `../ref/ffmpeg` is absent. Most work is stream copy;
+  a curated set of still-image decoders backs image hashing, and — for
+  `mc concat`'s re-encode path — a set of a/v decoders plus the native (LGPL)
+  MPEG-4 / MPEG-2 / MJPEG / AAC / AC-3 / FLAC encoders and `libswscale` /
+  `libswresample`. There is deliberately no H.264/H.265 encoder (would need
+  GPL `libx264`/`libx265`); the binary grew ~10 MB for the added components.
 - **`mc hash [file|folder ...] [-m <method>] [--select=<expr>] [-y] [-f] [--nr]`**:
   fingerprints each video (`.mp4 .mkv .mov .m4v .webm .avi`) and image
   (`.jpg .jpeg .jpe .jfif .png .apng .gif .webp`) file and renames it to
@@ -123,6 +127,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which is required. Folders are scanned recursively unless `--nr`. The matched
   files are shown as a TOON preview and confirmed unless `-y`. New package
   `internal/deletecmd`.
+- **`mc split <file> "<t1>,<t2>,…" [-o <folder>] [-y]`**: cuts a media file at
+  the given timestamps (seconds, `MM:SS` or `HH:MM:SS`) into
+  `<name>-Part1.<ext>`, `<name>-Part2.<ext>`, … (N timestamps → N+1 parts).
+  Stream copy via the FFmpeg segment muxer, so each part begins at the nearest
+  keyframe at or after its timestamp. Parts land in `-o`/`--outputFolder` or the
+  file's folder. New `ffmpeg.Split` (`mc_split`) and package
+  `internal/splitcmd`.
+- **`mc concat <file1> <file2> [<file3> …] [-o <outputFile>] [-y]`**: joins media
+  files in order. Matching codec/parameters → stream copy with timestamps made
+  continuous across inputs (`ffmpeg.ConcatCopy` / `mc_concat_copy`). Mismatched
+  inputs → a warning, then every input is re-encoded to MPEG-4 + AAC at the
+  first file's geometry / rate and joined (`ffmpeg.Transcode` / `mc_transcode`,
+  using `libswscale` + `libswresample`); the output container switches to
+  `.mkv` when the first file's extension can't hold MPEG-4/AAC. Default output
+  `<file1>-<file2>-…-combined.<ext>`. New package `internal/concatcmd`.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
   modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail

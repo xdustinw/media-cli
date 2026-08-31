@@ -55,14 +55,25 @@ image_decoders="mjpeg,mjpegb,jpegls,ljpeg,jpeg2000,png,apng,webp,vp8,gif,bmp,\
 tiff,targa,pcx,sgi,sunrast,psd,xpm,xbm,xwd,xface,pam,pbm,pgm,pgmyuv,ppm,pfm,phm,\
 pgx,qoi,hdr,exr,dpx,pictor,gem,cri,vbn"
 
+# Audio/video decoders for `mc concat`'s re-encode path (mismatched inputs).
+av_decoders="h264,hevc,mpeg4,mpeg2video,mpeg1video,vp9,msmpeg4v3,\
+aac,ac3,eac3,mp3,mp2,opus,vorbis,flac,alac,\
+pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_u8,pcm_s16be,pcm_s24be"
+
+# Native (LGPL) encoders `mc concat` re-encodes mismatched inputs with. There is
+# no h264/hevc encoder here — matching an h264 source falls back to mpeg4/aac.
+av_encoders="mpeg4,mpeg2video,mjpeg,aac,ac3,flac,pcm_s16le"
+
 cfg=(
 	--prefix="$prefix"
 	--disable-shared --enable-static --enable-pic
 	--disable-programs --disable-doc
 	--disable-htmlpages --disable-manpages --disable-podpages --disable-txtpages
-	--disable-avdevice --disable-avfilter --disable-swscale --disable-swresample
+	--disable-avdevice --disable-avfilter
+	--enable-swscale --enable-swresample
 	--disable-encoders --disable-decoders --disable-filters
-	--enable-decoder="$image_decoders"
+	--enable-decoder="$image_decoders,$av_decoders"
+	--enable-encoder="$av_encoders"
 	--disable-network --disable-autodetect --enable-zlib
 	--disable-debug
 )

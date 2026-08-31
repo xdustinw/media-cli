@@ -3,12 +3,12 @@ exec_prefix=${prefix}
 libdir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/lib
 includedir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/include
 
-Name: libavcodec
-Description: FFmpeg codec library
-Version: 63.8.101
-Requires: libswresample >= 7.2.100, libavutil >= 61.6.100
+Name: libswscale
+Description: FFmpeg image rescaling library
+Version: 10.2.100
+Requires: libavutil >= 61.6.100
 Requires.private: 
 Conflicts:
-Libs: -L${libdir}  -lavcodec -pthread -lm -latomic -lz
+Libs: -L${libdir}  -lswscale -lm -latomic
 Libs.private: 
 Cflags: -I${includedir}

@@ -19,6 +19,9 @@
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/samplefmt.h>
+#include <libavutil/audio_fifo.h>
+#include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 
 static void set_err(char *errbuf, size_t errbuf_size, int code) {
     if (!errbuf || errbuf_size == 0) {
@@ -788,4 +791,526 @@ int mc_probe(const char *filename, int deep,
     }
     *out = s; // caller frees with av_free
     return 0;
+}
+
+// ---------------------------------------------------------------------------
+// mc_split / mc_concat
+// ---------------------------------------------------------------------------
+
+static int carried_stream(enum AVMediaType t) {
+    return t == AVMEDIA_TYPE_VIDEO || t == AVMEDIA_TYPE_AUDIO ||
+           t == AVMEDIA_TYPE_SUBTITLE;
+}
+
+int mc_split(const char *infile, const char *out_pattern,
+             const char *cut_times_sec, char *errbuf, size_t errbuf_size) {
+    AVFormatContext *ic = NULL, *oc = NULL;
+    AVPacket *pkt = NULL;
+    int *smap = NULL;
+    AVDictionary *opts = NULL;
+    int ret = 0, header_written = 0;
+
+    ret = avformat_open_input(&ic, infile, NULL, NULL);
+    if (ret < 0) goto done;
+    ret = avformat_find_stream_info(ic, NULL);
+    if (ret < 0) goto done;
+
+    ret = avformat_alloc_output_context2(&oc, NULL, "segment", out_pattern);
+    if (ret < 0 || !oc) { if (ret >= 0) ret = AVERROR(ENOMEM); goto done; }
+
+    smap = av_malloc_array(ic->nb_streams, sizeof(*smap));
+    if (!smap) { ret = AVERROR(ENOMEM); goto done; }
+    for (unsigned i = 0; i < ic->nb_streams; i++) {
+        smap[i] = -1;
+        AVStream *in = ic->streams[i];
+        if (!carried_stream(in->codecpar->codec_type)) continue;
+        AVStream *os = avformat_new_stream(oc, NULL);
+        if (!os) { ret = AVERROR(ENOMEM); goto done; }
+        ret = avcodec_parameters_copy(os->codecpar, in->codecpar);
+        if (ret < 0) goto done;
+        os->codecpar->codec_tag = 0;
+        os->time_base = in->time_base;
+        smap[i] = os->index;
+    }
+    if (oc->nb_streams == 0) { ret = AVERROR_INVALIDDATA; goto done; }
+
+    av_dict_set(&opts, "segment_times", cut_times_sec, 0);
+    av_dict_set(&opts, "segment_start_number", "1", 0);
+    av_dict_set(&opts, "reset_timestamps", "1", 0);
+    av_dict_set(&opts, "individual_header_trailer", "1", 0);
+
+    ret = avformat_write_header(oc, &opts);
+    if (ret < 0) goto done;
+    header_written = 1;
+
+    pkt = av_packet_alloc();
+    if (!pkt) { ret = AVERROR(ENOMEM); goto done; }
+    while ((ret = av_read_frame(ic, pkt)) >= 0) {
+        int oi = smap[pkt->stream_index];
+        if (oi < 0) { av_packet_unref(pkt); continue; }
+        AVStream *in = ic->streams[pkt->stream_index];
+        AVStream *os = oc->streams[oi];
+        av_packet_rescale_ts(pkt, in->time_base, os->time_base);
+        pkt->stream_index = oi;
+        pkt->pos = -1;
+        ret = av_interleaved_write_frame(oc, pkt);
+        av_packet_unref(pkt);
+        if (ret < 0) goto done;
+    }
+    if (ret == AVERROR_EOF) ret = 0;
+    if (ret < 0) goto done;
+
+    ret = av_write_trailer(oc);
+    header_written = 0;
+
+done:
+    if (ret < 0) set_err(errbuf, errbuf_size, ret);
+    av_dict_free(&opts);
+    if (pkt) av_packet_free(&pkt);
+    av_free(smap);
+    if (oc) {
+        if (header_written) av_write_trailer(oc);
+        avformat_free_context(oc);
+    }
+    if (ic) avformat_close_input(&ic);
+    return ret;
+}
+
+// out_map maps input stream index -> output stream index, matching video then
+// audio in order. Streams beyond the first of each kind are dropped.
+static void concat_map(AVFormatContext *ic, AVFormatContext *oc, int *map) {
+    int have_v = 0, have_a = 0;
+    for (unsigned i = 0; i < ic->nb_streams; i++) {
+        map[i] = -1;
+        enum AVMediaType t = ic->streams[i]->codecpar->codec_type;
+        for (unsigned j = 0; j < oc->nb_streams; j++) {
+            if (oc->streams[j]->codecpar->codec_type != t) continue;
+            if (t == AVMEDIA_TYPE_VIDEO && have_v) continue;
+            if (t == AVMEDIA_TYPE_AUDIO && have_a) continue;
+            map[i] = j;
+            if (t == AVMEDIA_TYPE_VIDEO) have_v = 1;
+            if (t == AVMEDIA_TYPE_AUDIO) have_a = 1;
+            break;
+        }
+    }
+}
+
+int mc_concat_copy(const char *const *infiles, int n_in, const char *outfile,
+                   char *errbuf, size_t errbuf_size) {
+    AVFormatContext *oc = NULL;
+    AVPacket *pkt = NULL;
+    int ret = 0, header_written = 0;
+    int64_t base_us = 0;
+
+    ret = avformat_alloc_output_context2(&oc, NULL, NULL, outfile);
+    if (ret < 0 || !oc) { if (ret >= 0) ret = AVERROR(ENOMEM); goto done; }
+
+    // First input defines the output streams.
+    AVFormatContext *ic0 = NULL;
+    ret = avformat_open_input(&ic0, infiles[0], NULL, NULL);
+    if (ret < 0) goto done;
+    ret = avformat_find_stream_info(ic0, NULL);
+    if (ret < 0) { avformat_close_input(&ic0); goto done; }
+    for (unsigned i = 0; i < ic0->nb_streams; i++) {
+        AVStream *in = ic0->streams[i];
+        enum AVMediaType t = in->codecpar->codec_type;
+        if (t != AVMEDIA_TYPE_VIDEO && t != AVMEDIA_TYPE_AUDIO) continue;
+        // one video + one audio only
+        int dup = 0;
+        for (unsigned j = 0; j < oc->nb_streams; j++)
+            if (oc->streams[j]->codecpar->codec_type == t) dup = 1;
+        if (dup) continue;
+        AVStream *os = avformat_new_stream(oc, NULL);
+        if (!os) { avformat_close_input(&ic0); ret = AVERROR(ENOMEM); goto done; }
+        avcodec_parameters_copy(os->codecpar, in->codecpar);
+        os->codecpar->codec_tag = 0;
+    }
+    avformat_close_input(&ic0);
+    if (oc->nb_streams == 0) { ret = AVERROR_INVALIDDATA; goto done; }
+
+    if (!(oc->oformat->flags & AVFMT_NOFILE)) {
+        ret = avio_open(&oc->pb, outfile, AVIO_FLAG_WRITE);
+        if (ret < 0) goto done;
+    }
+    ret = avformat_write_header(oc, NULL);
+    if (ret < 0) goto done;
+    header_written = 1;
+
+    pkt = av_packet_alloc();
+    if (!pkt) { ret = AVERROR(ENOMEM); goto done; }
+
+    int64_t *last_dts = av_calloc(oc->nb_streams, sizeof(*last_dts));
+    if (!last_dts) { ret = AVERROR(ENOMEM); goto done; }
+    for (unsigned j = 0; j < oc->nb_streams; j++) last_dts[j] = AV_NOPTS_VALUE;
+
+    for (int k = 0; k < n_in; k++) {
+        AVFormatContext *ic = NULL;
+        ret = avformat_open_input(&ic, infiles[k], NULL, NULL);
+        if (ret < 0) { av_free(last_dts); goto done; }
+        ret = avformat_find_stream_info(ic, NULL);
+        if (ret < 0) { avformat_close_input(&ic); av_free(last_dts); goto done; }
+
+        int *map = av_malloc_array(ic->nb_streams, sizeof(*map));
+        if (!map) { avformat_close_input(&ic); av_free(last_dts); ret = AVERROR(ENOMEM); goto done; }
+        concat_map(ic, oc, map);
+
+        int64_t *off = av_calloc(oc->nb_streams, sizeof(*off));
+        int64_t *first = av_malloc_array(oc->nb_streams, sizeof(*first));
+        if (!off || !first) { av_free(map); av_free(off); av_free(first);
+                              avformat_close_input(&ic); av_free(last_dts);
+                              ret = AVERROR(ENOMEM); goto done; }
+        for (unsigned j = 0; j < oc->nb_streams; j++) {
+            off[j] = av_rescale_q(base_us, AV_TIME_BASE_Q, oc->streams[j]->time_base);
+            first[j] = AV_NOPTS_VALUE;
+        }
+
+        while ((ret = av_read_frame(ic, pkt)) >= 0) {
+            int oi = map[pkt->stream_index];
+            if (oi < 0) { av_packet_unref(pkt); continue; }
+            AVStream *is = ic->streams[pkt->stream_index];
+            AVStream *os = oc->streams[oi];
+            av_packet_rescale_ts(pkt, is->time_base, os->time_base);
+            int64_t ref = pkt->dts != AV_NOPTS_VALUE ? pkt->dts : pkt->pts;
+            if (first[oi] == AV_NOPTS_VALUE) first[oi] = ref;
+            int64_t shift = off[oi] - first[oi];
+            if (pkt->pts != AV_NOPTS_VALUE) pkt->pts += shift;
+            if (pkt->dts != AV_NOPTS_VALUE) pkt->dts += shift;
+            if (pkt->dts != AV_NOPTS_VALUE && last_dts[oi] != AV_NOPTS_VALUE &&
+                pkt->dts <= last_dts[oi]) {
+                int64_t bump = last_dts[oi] + 1 - pkt->dts;
+                pkt->dts += bump;
+                if (pkt->pts != AV_NOPTS_VALUE) pkt->pts += bump;
+            }
+            if (pkt->dts != AV_NOPTS_VALUE) last_dts[oi] = pkt->dts;
+            pkt->stream_index = oi;
+            pkt->pos = -1;
+            ret = av_interleaved_write_frame(oc, pkt);
+            av_packet_unref(pkt);
+            if (ret < 0) break;
+        }
+        int64_t dur = ic->duration;
+        av_free(map); av_free(off); av_free(first);
+        avformat_close_input(&ic);
+        if (ret < 0 && ret != AVERROR_EOF) { av_free(last_dts); goto done; }
+        ret = 0;
+        base_us += dur > 0 ? dur : 0;
+    }
+    av_free(last_dts);
+
+    ret = av_write_trailer(oc);
+    header_written = 0;
+
+done:
+    if (ret < 0) set_err(errbuf, errbuf_size, ret);
+    if (pkt) av_packet_free(&pkt);
+    if (oc) {
+        if (header_written) av_write_trailer(oc);
+        if (oc->pb && !(oc->oformat->flags & AVFMT_NOFILE)) avio_closep(&oc->pb);
+        avformat_free_context(oc);
+    }
+    return ret;
+}
+
+// enc_write sends frame (NULL to flush) to enc and muxes every packet it
+// produces into oc on stream os.
+static int enc_write(AVFormatContext *oc, AVCodecContext *enc, AVStream *os,
+                     AVFrame *frame) {
+    int ret = avcodec_send_frame(enc, frame);
+    if (ret < 0) return ret;
+    AVPacket *pkt = av_packet_alloc();
+    if (!pkt) return AVERROR(ENOMEM);
+    while ((ret = avcodec_receive_packet(enc, pkt)) >= 0) {
+        av_packet_rescale_ts(pkt, enc->time_base, os->time_base);
+        pkt->stream_index = os->index;
+        ret = av_interleaved_write_frame(oc, pkt);
+        av_packet_unref(pkt);
+        if (ret < 0) break;
+    }
+    av_packet_free(&pkt);
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) ret = 0;
+    return ret;
+}
+
+// mc_transcode re-encodes infile to outfile as MPEG-4 video + AAC audio at the
+// given geometry / rate (there is no native H.264 encoder in this build).
+// vw <= 0 drops video; sample_rate <= 0 drops audio. Used by `mc concat` to
+// normalise mismatched inputs before a stream-copy join.
+int mc_transcode(const char *infile, const char *outfile,
+                 int vw, int vh, int fps_num, int fps_den,
+                 int sample_rate, int channels,
+                 char *errbuf, size_t errbuf_size) {
+    AVFormatContext *ic = NULL, *oc = NULL;
+    AVCodecContext *vdec = NULL, *adec = NULL, *venc = NULL, *aenc = NULL;
+    struct SwsContext *sws = NULL;
+    SwrContext *swr = NULL;
+    AVAudioFifo *fifo = NULL;
+    AVFrame *fr = NULL, *sf = NULL;
+    AVPacket *pkt = NULL;
+    AVStream *vos = NULL, *aos = NULL;
+    int vsi = -1, asi = -1, ret = 0, header_written = 0;
+    int64_t v_pts = 0, a_pts = 0, v_first = AV_NOPTS_VALUE, v_last = AV_NOPTS_VALUE;
+    AVRational v_tb = (AVRational){0, 1};
+
+    if (fps_num <= 0 || fps_den <= 0) { fps_num = 25; fps_den = 1; }
+
+    ret = avformat_open_input(&ic, infile, NULL, NULL);
+    if (ret < 0) goto done;
+    ret = avformat_find_stream_info(ic, NULL);
+    if (ret < 0) goto done;
+
+    ret = avformat_alloc_output_context2(&oc, NULL, NULL, outfile);
+    if (ret < 0 || !oc) { if (ret >= 0) ret = AVERROR(ENOMEM); goto done; }
+
+    if (vw > 0) {
+        vsi = av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+        if (vsi < 0) { ret = AVERROR_STREAM_NOT_FOUND; goto done; }
+        const AVCodec *d = avcodec_find_decoder(ic->streams[vsi]->codecpar->codec_id);
+        if (!d) { ret = AVERROR_DECODER_NOT_FOUND; goto done; }
+        vdec = avcodec_alloc_context3(d);
+        avcodec_parameters_to_context(vdec, ic->streams[vsi]->codecpar);
+        v_tb = ic->streams[vsi]->time_base;
+        vdec->pkt_timebase = v_tb; // so best_effort_timestamp is populated
+        ret = avcodec_open2(vdec, d, NULL);
+        if (ret < 0) goto done;
+
+        const AVCodec *e = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+        if (!e) { ret = AVERROR_ENCODER_NOT_FOUND; goto done; }
+        venc = avcodec_alloc_context3(e);
+        venc->width = vw; venc->height = vh;
+        venc->pix_fmt = AV_PIX_FMT_YUV420P;
+        venc->time_base = (AVRational){fps_den, fps_num};
+        venc->framerate = (AVRational){fps_num, fps_den};
+        venc->gop_size = 12;
+        venc->max_b_frames = 0;
+        venc->bit_rate = (int64_t)vw * vh * 2;
+        if (oc->oformat->flags & AVFMT_GLOBALHEADER)
+            venc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        ret = avcodec_open2(venc, e, NULL);
+        if (ret < 0) goto done;
+
+        vos = avformat_new_stream(oc, NULL);
+        if (!vos) { ret = AVERROR(ENOMEM); goto done; }
+        avcodec_parameters_from_context(vos->codecpar, venc);
+        vos->time_base = venc->time_base;
+
+        sws = sws_getContext(vdec->width, vdec->height,
+                             vdec->pix_fmt == AV_PIX_FMT_NONE ? AV_PIX_FMT_YUV420P : vdec->pix_fmt,
+                             vw, vh, AV_PIX_FMT_YUV420P, SWS_BILINEAR, NULL, NULL, NULL);
+        if (!sws) { ret = AVERROR(ENOMEM); goto done; }
+    }
+
+    if (sample_rate > 0) {
+        if (channels <= 0) channels = 2;
+        asi = av_find_best_stream(ic, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+        if (asi < 0) { ret = AVERROR_STREAM_NOT_FOUND; goto done; }
+        const AVCodec *d = avcodec_find_decoder(ic->streams[asi]->codecpar->codec_id);
+        if (!d) { ret = AVERROR_DECODER_NOT_FOUND; goto done; }
+        adec = avcodec_alloc_context3(d);
+        avcodec_parameters_to_context(adec, ic->streams[asi]->codecpar);
+        adec->pkt_timebase = ic->streams[asi]->time_base;
+        ret = avcodec_open2(adec, d, NULL);
+        if (ret < 0) goto done;
+
+        const AVCodec *e = avcodec_find_encoder(AV_CODEC_ID_AAC);
+        if (!e) { ret = AVERROR_ENCODER_NOT_FOUND; goto done; }
+        aenc = avcodec_alloc_context3(e);
+        aenc->sample_rate = sample_rate;
+        av_channel_layout_default(&aenc->ch_layout, channels);
+        aenc->sample_fmt = AV_SAMPLE_FMT_FLTP;
+        aenc->bit_rate = 128000;
+        aenc->time_base = (AVRational){1, sample_rate};
+        if (oc->oformat->flags & AVFMT_GLOBALHEADER)
+            aenc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+        ret = avcodec_open2(aenc, e, NULL);
+        if (ret < 0) goto done;
+
+        aos = avformat_new_stream(oc, NULL);
+        if (!aos) { ret = AVERROR(ENOMEM); goto done; }
+        avcodec_parameters_from_context(aos->codecpar, aenc);
+        aos->time_base = aenc->time_base;
+
+        AVChannelLayout inlay;
+        if (adec->ch_layout.nb_channels > 0)
+            av_channel_layout_copy(&inlay, &adec->ch_layout);
+        else
+            av_channel_layout_default(&inlay, 2);
+        ret = swr_alloc_set_opts2(&swr, &aenc->ch_layout, aenc->sample_fmt, sample_rate,
+                                  &inlay, adec->sample_fmt, adec->sample_rate, 0, NULL);
+        av_channel_layout_uninit(&inlay);
+        if (ret < 0) goto done;
+        ret = swr_init(swr);
+        if (ret < 0) goto done;
+        fifo = av_audio_fifo_alloc(aenc->sample_fmt, aenc->ch_layout.nb_channels, 1);
+        if (!fifo) { ret = AVERROR(ENOMEM); goto done; }
+    }
+
+    if (oc->nb_streams == 0) { ret = AVERROR_INVALIDDATA; goto done; }
+
+    if (!(oc->oformat->flags & AVFMT_NOFILE)) {
+        ret = avio_open(&oc->pb, outfile, AVIO_FLAG_WRITE);
+        if (ret < 0) goto done;
+    }
+    ret = avformat_write_header(oc, NULL);
+    if (ret < 0) goto done;
+    header_written = 1;
+
+    fr = av_frame_alloc();
+    sf = av_frame_alloc();
+    pkt = av_packet_alloc();
+    if (!fr || !sf || !pkt) { ret = AVERROR(ENOMEM); goto done; }
+
+    int flushing = 0;
+    while (1) {
+        int have_pkt = 0;
+        if (!flushing) {
+            ret = av_read_frame(ic, pkt);
+            if (ret == AVERROR_EOF) { flushing = 1; }
+            else if (ret < 0) goto done;
+            else have_pkt = 1;
+        }
+
+        for (int pass = 0; pass < 2; pass++) {
+            AVCodecContext *dec = pass == 0 ? vdec : adec;
+            int si = pass == 0 ? vsi : asi;
+            if (!dec) continue;
+            if (have_pkt && pkt->stream_index != si) continue;
+            if (!flushing && !have_pkt) continue;
+
+            ret = avcodec_send_packet(dec, flushing ? NULL : pkt);
+            if (ret < 0 && ret != AVERROR_EOF) goto done;
+
+            while ((ret = avcodec_receive_frame(dec, fr)) >= 0) {
+                if (pass == 0) {
+                    // Convert to the target constant frame rate: place each
+                    // frame at round(real_time * fps) and drop frames that land
+                    // on an already-used slot (input faster than target).
+                    int64_t ts = fr->best_effort_timestamp;
+                    if (ts == AV_NOPTS_VALUE) ts = fr->pts;
+                    int64_t want;
+                    if (ts == AV_NOPTS_VALUE) {
+                        want = v_pts++;
+                    } else {
+                        if (v_first == AV_NOPTS_VALUE) v_first = ts;
+                        double rt = (double)(ts - v_first) * av_q2d(v_tb);
+                        want = (int64_t)(rt * (double)fps_num / (double)fps_den + 0.5);
+                        v_pts = want + 1;
+                    }
+                    if (v_last != AV_NOPTS_VALUE && want <= v_last) {
+                        av_frame_unref(fr);
+                        continue;
+                    }
+                    v_last = want;
+                    av_frame_unref(sf);
+                    sf->format = AV_PIX_FMT_YUV420P; sf->width = vw; sf->height = vh;
+                    ret = av_frame_get_buffer(sf, 0);
+                    if (ret < 0) { av_frame_unref(fr); goto done; }
+                    sws_scale(sws, (const uint8_t * const *)fr->data, fr->linesize,
+                              0, fr->height, sf->data, sf->linesize);
+                    sf->pts = want;
+                    ret = enc_write(oc, venc, vos, sf);
+                    av_frame_unref(fr);
+                    if (ret < 0) goto done;
+                } else {
+                    int cap = swr_get_out_samples(swr, fr->nb_samples);
+                    uint8_t **conv = NULL; int lines = 0;
+                    ret = av_samples_alloc_array_and_samples(&conv, &lines,
+                            aenc->ch_layout.nb_channels, cap, aenc->sample_fmt, 0);
+                    if (ret < 0) { av_frame_unref(fr); goto done; }
+                    int got = swr_convert(swr, conv, cap,
+                                          (const uint8_t **)fr->extended_data, fr->nb_samples);
+                    if (got > 0) av_audio_fifo_write(fifo, (void **)conv, got);
+                    if (conv) { av_freep(&conv[0]); av_freep(&conv); }
+                    av_frame_unref(fr);
+                    if (got < 0) { ret = got; goto done; }
+
+                    while (av_audio_fifo_size(fifo) >= aenc->frame_size) {
+                        AVFrame *af = av_frame_alloc();
+                        af->nb_samples = aenc->frame_size;
+                        af->format = aenc->sample_fmt;
+                        av_channel_layout_copy(&af->ch_layout, &aenc->ch_layout);
+                        af->sample_rate = aenc->sample_rate;
+                        if ((ret = av_frame_get_buffer(af, 0)) < 0) { av_frame_free(&af); goto done; }
+                        av_audio_fifo_read(fifo, (void **)af->data, aenc->frame_size);
+                        af->pts = a_pts; a_pts += aenc->frame_size;
+                        ret = enc_write(oc, aenc, aos, af);
+                        av_frame_free(&af);
+                        if (ret < 0) goto done;
+                    }
+                }
+            }
+            if (ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) goto done;
+        }
+
+        if (have_pkt) av_packet_unref(pkt);
+        if (flushing) break;
+    }
+
+    // Flush the resampler's internal buffer into the FIFO.
+    if (aenc && swr) {
+        int fcap = swr_get_out_samples(swr, 0);
+        if (fcap > 0) {
+            uint8_t **fc = NULL; int fl = 0;
+            if (av_samples_alloc_array_and_samples(&fc, &fl, aenc->ch_layout.nb_channels,
+                                                   fcap, aenc->sample_fmt, 0) >= 0) {
+                int fg = swr_convert(swr, fc, fcap, NULL, 0);
+                if (fg > 0) av_audio_fifo_write(fifo, (void **)fc, fg);
+                if (fc) { av_freep(&fc[0]); av_freep(&fc); }
+            }
+        }
+        while (av_audio_fifo_size(fifo) >= aenc->frame_size) {
+            AVFrame *af = av_frame_alloc();
+            af->nb_samples = aenc->frame_size;
+            af->format = aenc->sample_fmt;
+            av_channel_layout_copy(&af->ch_layout, &aenc->ch_layout);
+            af->sample_rate = aenc->sample_rate;
+            if ((ret = av_frame_get_buffer(af, 0)) < 0) { av_frame_free(&af); goto done; }
+            av_audio_fifo_read(fifo, (void **)af->data, aenc->frame_size);
+            af->pts = a_pts; a_pts += aenc->frame_size;
+            ret = enc_write(oc, aenc, aos, af);
+            av_frame_free(&af);
+            if (ret < 0) goto done;
+        }
+    }
+
+    // Drain the audio FIFO's tail as a final short frame, then flush encoders.
+    if (aenc && av_audio_fifo_size(fifo) > 0) {
+        int n = av_audio_fifo_size(fifo);
+        AVFrame *af = av_frame_alloc();
+        af->nb_samples = n;
+        af->format = aenc->sample_fmt;
+        av_channel_layout_copy(&af->ch_layout, &aenc->ch_layout);
+        af->sample_rate = aenc->sample_rate;
+        if ((ret = av_frame_get_buffer(af, 0)) >= 0) {
+            av_audio_fifo_read(fifo, (void **)af->data, n);
+            af->pts = a_pts; a_pts += n;
+            ret = enc_write(oc, aenc, aos, af);
+        }
+        av_frame_free(&af);
+        if (ret < 0) goto done;
+    }
+    if (venc && (ret = enc_write(oc, venc, vos, NULL)) < 0) goto done;
+    if (aenc && (ret = enc_write(oc, aenc, aos, NULL)) < 0) goto done;
+
+    ret = av_write_trailer(oc);
+    header_written = 0;
+
+done:
+    if (ret < 0) set_err(errbuf, errbuf_size, ret);
+    if (pkt) av_packet_free(&pkt);
+    if (fr) av_frame_free(&fr);
+    if (sf) av_frame_free(&sf);
+    if (fifo) av_audio_fifo_free(fifo);
+    if (swr) swr_free(&swr);
+    if (sws) sws_freeContext(sws);
+    if (vdec) avcodec_free_context(&vdec);
+    if (adec) avcodec_free_context(&adec);
+    if (venc) avcodec_free_context(&venc);
+    if (aenc) avcodec_free_context(&aenc);
+    if (oc) {
+        if (header_written) av_write_trailer(oc);
+        if (oc->pb && !(oc->oformat->flags & AVFMT_NOFILE)) avio_closep(&oc->pb);
+        avformat_free_context(oc);
+    }
+    if (ic) avformat_close_input(&ic);
+    return ret < 0 ? ret : 0;
 }

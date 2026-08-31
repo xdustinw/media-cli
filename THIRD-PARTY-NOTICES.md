@@ -7,7 +7,7 @@ distribution satisfies as described.
 
 ---
 
-## FFmpeg (libavformat, libavcodec, libavutil)
+## FFmpeg (libavformat, libavcodec, libswscale, libswresample, libavutil)
 
 - **Homepage:** <https://ffmpeg.org>
 - **Copyright:** © the FFmpeg developers
@@ -16,10 +16,13 @@ distribution satisfies as described.
   (and `COPYING.LGPLv3`). FFmpeg's own license summary:
   `third_party/ffmpeg/LICENSE.md`.
 
-`mc` links `libavformat`, `libavcodec` and `libavutil` **statically** into its
-executable. The libraries are built with neither `--enable-gpl` nor
-`--enable-nonfree` and enable no external codec libraries, so the LGPL-2.1-or-later
-terms apply unchanged and the result is redistributable.
+`mc` links `libavformat`, `libavcodec`, `libswscale`, `libswresample` and
+`libavutil` **statically** into its executable. The libraries are built with
+neither `--enable-gpl` nor `--enable-nonfree` and enable no external codec
+libraries — only FFmpeg's own LGPL decoders and encoders (the MPEG-4 / MPEG-2 /
+MJPEG / AAC / AC-3 / FLAC / PCM encoders; there is no H.264/H.265 encoder). The
+LGPL-2.1-or-later terms therefore apply unchanged and the result is
+redistributable.
 
 ### Corresponding source
 
@@ -29,7 +32,8 @@ The exact FFmpeg source these libraries are built from:
 - **Commit:** `b32f8d1c2377079302d23f82d555d13deda68c57` (also recorded as
   `FFMPEG_COMMIT` in `scripts/build-ffmpeg.sh` and `.github/workflows/release.yml`)
 - **Build configuration:** produced by `scripts/build-ffmpeg.sh` in this
-  repository (static libraries, most components disabled, no GPL/nonfree).
+  repository (static libraries; no programs, `avfilter` or `avdevice`; a curated
+  decoder/encoder set; no GPL/nonfree; no external codec libraries).
 
 ### Relinking (LGPL §6)
 

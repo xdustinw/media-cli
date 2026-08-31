@@ -69,6 +69,8 @@ the old `mc.exe` as `mc-<version>.exe`).
 | [`mc copy`](#mc-copy--mc-move) / [`mc move`](#mc-copy--mc-move) | Bring files into a folder, resolving name-hash duplicates |
 | [`mc dedupe`](#mc-dedupe) | Delete duplicate copies of hash-named files across folders |
 | [`mc delete`](#mc-delete) | Delete files under folders that match a `--select` filter |
+| [`mc split`](#mc-split) | Cut a media file at timestamps into numbered parts |
+| [`mc concat`](#mc-concat) | Join media files into one |
 | [`mc info`](#mc-info) | Dump everything known about one file |
 | [`mc update`](#mc-update) | Update `mc` to the latest release |
 | [`mc version`](#mc-version) | Print version and bundled-FFmpeg info |
@@ -176,8 +178,9 @@ $ mc list tmp --meta=mc.hash,rating
 - `--format` – `toon` (default), `json`, or `csv`.
 - `-r` / `--recursive` – descend into subfolders (off by default).
 
-Every command that walks files (`hash`, `list`, `set`, `info`, `copy`, `move`,
-`dedupe`, `delete`) prints a one-line summary to stderr when it finishes, e.g.
+Every command that processes files (`hash`, `list`, `set`, `info`, `copy`,
+`move`, `dedupe`, `delete`, `split`, `concat`) prints a one-line summary to
+stderr when it finishes, e.g.
 `processed 12 file(s) in 3.4s (28.1 MB/s)` (runs over a minute read as
 `2m 5s`).
 
@@ -303,6 +306,47 @@ mc delete . --select='ext=tmp and size<1k'
 
 The matched files are shown as a TOON preview and confirmed before deletion,
 unless `-y`.
+
+### `mc split`
+
+```
+mc split <file> "<t1>,<t2>,…" [-o <folder>] [-y]
+```
+
+Cut `<file>` at the given timestamps into `<name>-Part1.<ext>`,
+`<name>-Part2.<ext>`, … — N timestamps make N+1 parts. Timestamps are seconds,
+`MM:SS` or `HH:MM:SS` (fractions allowed), comma separated.
+
+```bash
+mc split trip.mp4 "1:20,2:30,4:50"
+mc split trip.mp4 "90,210" -o ~/clips
+```
+
+The streams are **copied, not re-encoded**, so each part starts at the nearest
+keyframe at or after its timestamp (cuts are not frame-accurate). Parts go to
+`-o` / `--outputFolder`, or the file's own folder.
+
+### `mc concat`
+
+```
+mc concat <file1> <file2> [<file3> …] [-o <outputFile>] [-y]
+```
+
+Join two or more files, in order, into one output.
+
+```bash
+mc concat clip1.mp4 clip2.mp4 clip3.mp4          # -> clip1-clip2-clip3-combined.mp4
+mc concat a.mp4 b.mp4 -o joined.mp4
+```
+
+- When the inputs share codec and parameters they are **stream-copied** (fast,
+  lossless), with timestamps made continuous across inputs.
+- When they differ, a warning is shown and **every input is re-encoded** to
+  MPEG-4 video + AAC audio at the first file's resolution / frame rate / sample
+  rate, then joined. This build has no H.264 encoder, so expect a quality drop;
+  the output container switches to `.mkv` if the first file's extension can't
+  hold MPEG-4/AAC.
+- Without `-o` the result is `<file1>-<file2>-…-combined.<ext>`.
 
 ### `mc info`
 

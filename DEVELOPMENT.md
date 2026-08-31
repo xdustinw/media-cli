@@ -71,19 +71,29 @@ scripts/build-ffmpeg.sh                        # for the host GOOS/GOARCH
 TARGET_GOOS=windows scripts/build-ffmpeg.sh    # cross-build (needs mingw-w64)
 ```
 
+The FFmpeg build takes roughly 15–25 minutes (the h264/hevc decoders dominate).
+
 ### `scripts/build-ffmpeg.sh`
 
 Builds the static FFmpeg libraries into `third_party/ffmpeg/<goos>_<goarch>/`
 and strips everything `mc` does not need (no programs, no `avfilter` /
-`swscale` / `swresample` / `avdevice`, no encoders, decoders limited to a
-curated still-image set, network disabled).
+`avdevice`, network disabled). What is enabled:
+
+- a curated still-image decoder set (for `mc hash` on images);
+- a curated a/v decoder set — `h264 hevc mpeg4 mpeg2video vp9 aac ac3 mp3 opus
+  vorbis flac …` — and the native encoders `mpeg4 mpeg2video mjpeg aac ac3 flac
+  pcm_s16le`, plus `libswscale` and `libswresample`, for `mc concat`'s
+  re-encode path.
+
+There is **no H.264/H.265 encoder** — that would need GPL `libx264`/`libx265`.
+`mc concat` re-encodes mismatched inputs to MPEG-4 + AAC instead.
 
 **License-relevant:** the script passes neither `--enable-gpl` nor
 `--enable-nonfree`, and enables no external codec libraries — only `--enable-zlib`.
-This keeps FFmpeg at **LGPL-2.1-or-later** and the resulting `mc` binary freely
-redistributable. Do not add `--enable-gpl` / `--enable-nonfree` (or libx264,
-libx265, …) without updating `THIRD-PARTY-NOTICES.md` and the project's license
-posture accordingly.
+Every enabled encoder/decoder is LGPL, so FFmpeg stays **LGPL-2.1-or-later** and
+the `mc` binary stays freely redistributable. Do not add `--enable-gpl` /
+`--enable-nonfree` (or libx264, libx265, libfdk-aac, …) without updating
+`THIRD-PARTY-NOTICES.md` and the project's license posture accordingly.
 
 | Input | Purpose |
 | --- | --- |
@@ -102,8 +112,9 @@ and `libz-mingw-w64-dev`.
 
 ### cgo wiring
 
-`internal/ffmpeg/ffmpeg.go` has one `#cgo` block per `GOOS,GOARCH`, each pointing
-at `third_party/ffmpeg/<goos>_<goarch>/{include,lib}` with the platform's system
+`internal/ffmpeg/ffmpeg.go` has one `#cgo` block per `GOOS,GOARCH`, each linking
+`libavformat` / `libavcodec` / `libswscale` / `libswresample` / `libavutil` from
+`third_party/ffmpeg/<goos>_<goarch>/lib` with the platform's system
 libraries appended (`-latomic -lpthread` on Linux, `-liconv` on macOS,
 `-lbcrypt -lws2_32 -lsecur32 -lole32 -luser32` on Windows). Building for a
 platform whose libraries are absent fails at link with the missing `.a` path.
@@ -112,7 +123,10 @@ The Windows binary is built with `-ldflags -extldflags=-static` so zlib, libgcc,
 libwinpthread and libssp are linked in and the `.exe` has no DLL dependencies
 beyond the OS's own (`kernel32`, `bcrypt`, …).
 
-The C bridge is `internal/ffmpeg/bridge.c` / `bridge.h`.
+The C bridge is `internal/ffmpeg/bridge.c` / `bridge.h`: stream/pixel hashing,
+tag remux, `Inspect` probe, `mc_split` (segment muxer), `mc_concat_copy`
+(timestamp-continuous stream-copy join) and `mc_transcode` (decode → swscale /
+swresample → MPEG-4 / AAC encode, used by `mc concat` for mismatched inputs).
 
 ## Versioning
 
@@ -204,6 +218,7 @@ no GPL/nonfree parts. Compliance is handled by:
 | `internal/copycmd/` | `mc copy` / `mc move`: name-hash duplicate resolution |
 | `internal/dedupecmd/` | `mc dedupe`: delete duplicate hash-named files across folders |
 | `internal/deletecmd/` | `mc delete`: remove files matching a required `--select` |
+| `internal/splitcmd/`, `internal/concatcmd/` | `mc split` (keyframe cut) / `mc concat` (stream-copy or re-encode join) |
 | `internal/mediainfo/` | filesystem + probe + imgmeta → one record; rating/authors/tags derivation |
 | `internal/query/` | `--select` / `--sort-by` parser and evaluator |
 | `internal/tag/` | `mc set` `key=value,…` parser |

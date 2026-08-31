@@ -45,6 +45,8 @@ func TestListInfoHelp(t *testing.T) {
 		{"move", "duplicate"},
 		{"dedupe", "keep"},
 		{"delete", "--select"},
+		{"split", "timestamp"},
+		{"concat", "re-encode"},
 	} {
 		var out bytes.Buffer
 		rootCmd.SetOut(&out)

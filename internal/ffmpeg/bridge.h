@@ -81,4 +81,28 @@ int mc_read_tag(const char *filename, const char *key,
 int mc_probe(const char *filename, int deep,
              char **out, char *errbuf, size_t errbuf_size);
 
+// mc_split splits infile at the cut points in cut_times_sec (a comma-separated
+// list of seconds, e.g. "80,150,290") into out_pattern — a path containing a
+// single "%d" for the 1-based part number. Stream copy via the segment muxer;
+// cuts land on the nearest keyframe at or after each time. N cut points produce
+// N+1 parts. Returns 0 on success or a negative AVERROR code (message in errbuf).
+int mc_split(const char *infile, const char *out_pattern,
+             const char *cut_times_sec, char *errbuf, size_t errbuf_size);
+
+// mc_concat_copy concatenates n_in inputs into outfile by stream copy, making
+// timestamps continuous across inputs. The caller must have checked that the
+// inputs share codec/parameters (the first input defines the output streams;
+// one video + one audio). Returns 0 or a negative AVERROR code.
+int mc_concat_copy(const char *const *infiles, int n_in, const char *outfile,
+                   char *errbuf, size_t errbuf_size);
+
+// mc_transcode re-encodes infile to outfile as MPEG-4 video + AAC audio at the
+// given geometry and audio rate (this build has no H.264 encoder). vw <= 0
+// drops video; sample_rate <= 0 drops audio. Used by `mc concat` to normalise
+// mismatched inputs before a stream-copy join. Returns 0 or a negative AVERROR.
+int mc_transcode(const char *infile, const char *outfile,
+                 int vw, int vh, int fps_num, int fps_den,
+                 int sample_rate, int channels,
+                 char *errbuf, size_t errbuf_size);
+
 #endif

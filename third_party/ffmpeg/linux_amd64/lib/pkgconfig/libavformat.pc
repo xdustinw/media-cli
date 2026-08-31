@@ -6,7 +6,7 @@ includedir=/home/da/work/media-cli/third_party/ffmpeg/linux_amd64/include
 Name: libavformat
 Description: FFmpeg container format library
 Version: 63.6.100
-Requires: libavcodec >= 63.8.101, libavutil >= 61.6.100
+Requires: libavcodec >= 63.8.101, libswresample >= 7.2.100, libavutil >= 61.6.100
 Requires.private: 
 Conflicts:
 Libs: -L${libdir}  -lavformat -lm -lz -latomic
