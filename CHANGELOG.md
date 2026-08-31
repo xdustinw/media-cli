@@ -116,10 +116,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   overwritten. The plan is shown as a TOON preview first. New package
   `internal/copycmd`; `media.CopyFile` / `media.MoveFile` / `media.WalkFiles` /
   `media.DiscoverMany` / `media.Facts`; `hashcmd.HashInPlace`.
-- **`mc dedupe <folder> [<folder> ...] [-m <method>] [--select=<expr>] [-y] [--nr]`**:
+- **`mc dedupe [folder ...] [-m <method>] [--select=<expr>] [-y] [--nr]`**:
   groups files by the `.<6-hex>` short hash in their name (from `mc hash`, no
-  metadata read) across the folders and deletes all but one copy of each set.
-  Folders are scanned recursively unless `--nr`. `-m` / `--method` chooses the
+  metadata read) across the folders (default: the current directory) and deletes
+  all but one copy of each set. Folders are scanned recursively unless `--nr`. `-m` / `--method` chooses the
   keeper: `interactive` (default — pick per set, or skip it), `longer-name`,
   `newer`, or `older`. `--select` filters the files. Files without a short hash
   are offered to `mc hash` first (`-y` hashes them); declined, they are grouped

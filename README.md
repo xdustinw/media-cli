@@ -270,12 +270,13 @@ anything happens.
 ### `mc dedupe`
 
 ```
-mc dedupe <folder> [<folder> ...] [-m <method>] [--select=<expr>] [-y] [--nr]
+mc dedupe [folder ...] [-m <method>] [--select=<expr>] [-y] [--nr]
 ```
 
 Groups files by the `.<6-hex>` short hash in their name (from
-[`mc hash`](#mc-hash)) across the given folders, then **deletes all but one
-copy** of each set. Folders are scanned recursively unless `--nr`.
+[`mc hash`](#mc-hash)) across the given folders (default: the current
+directory), then **deletes all but one copy** of each set. Folders are scanned
+recursively unless `--nr`.
 
 | `-m` / `--method` | which copy is kept |
 | --- | --- |

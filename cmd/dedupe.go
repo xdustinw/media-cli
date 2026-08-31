@@ -23,11 +23,12 @@ var (
 )
 
 var dedupeCmd = &cobra.Command{
-	Use:   "dedupe <folder> [<folder> ...]",
+	Use:   "dedupe [folder ...]",
 	Short: "Delete duplicate copies of hash-named files across folders",
 	Long: `dedupe groups files by the ".<6-hex>" short hash in their name (written by
-'mc hash') across the given folders, and deletes all but one copy of each set.
-Folders are scanned recursively unless --nr is passed.
+'mc hash') across the given folders (default: the current directory), and
+deletes all but one copy of each set. Folders are scanned recursively unless
+--nr is passed.
 
 Which copy is kept:
 
@@ -40,7 +41,7 @@ Which copy is kept:
 --select filters the files (fields: name, path, ext, size, modifiedAt, kind).
 The full list of deletions is shown as a TOON preview and confirmed before
 anything is removed, unless -y.`,
-	Args: cobra.MinimumNArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		method, err := dedupecmd.ParseMethod(flagDedupeMethod)
 		if err != nil {
@@ -50,10 +51,15 @@ anything is removed, unless -y.`,
 			vip.Set(config.KeyAssumeYes, flagDedupeYes)
 		}
 
+		folders := args
+		if len(folders) == 0 {
+			folders = []string{"."}
+		}
+
 		in := bufio.NewReader(cmd.InOrStdin())
 		out := cmd.OutOrStdout()
 		return dedupecmd.Run(cmd.Context(), dedupecmd.Options{
-			Folders:   args,
+			Folders:   folders,
 			Method:    method,
 			Select:    flagDedupeSelect,
 			Recursive: !flagDedupeNR,
