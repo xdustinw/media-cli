@@ -20,21 +20,24 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/xdustinw/media-cli/internal/ffmpeg"
 	"github.com/xdustinw/media-cli/internal/imgmeta"
 	"github.com/xdustinw/media-cli/internal/media"
+	"github.com/xdustinw/media-cli/internal/query"
 )
 
 // Options configures a Run.
 type Options struct {
-	Target      string // file or directory (required)
+	Targets     []string // files and/or directories (at least one)
 	Extensions  []string
-	Method      Method // "" => DefaultMethod (ffmpeg-10m)
+	Method      Method // MethodAuto ("") => ffmpeg-10m with md5-10m fallback
+	Select      string // optional --select filter (filesystem fields only)
 	MetadataKey string // freeform tag key, e.g. "mc.hash"
 	NameLength  int    // hash prefix length used in the renamed filename
-	AssumeYes   bool   // skip the confirmation prompt
+	AssumeYes   bool   // skip the confirmation prompt(s)
 	Force       bool   // re-hash files that already carry the tag (ffmpeg method only)
 	Recursive   bool   // descend into subdirectories
 
@@ -54,15 +57,17 @@ const (
 
 type item struct {
 	path        string // current absolute/clean path
-	rel         string // display path relative to the target
+	rel         string // display path
 	kind        media.Kind
 	tag         tagger // nil for rename-only methods
 	hash        string
 	prefix      string
 	newPath     string
+	newRel      string // display path for newPath
 	existingTag string // ffmpeg: current mc.hash value; rename-only: the .<hex> slot already in the name
 	hashChanged bool   // the existing tag / name slot no longer matches the content
 	trusted     bool   // hash taken from the existing tag, not recomputed
+	usedMethod  Method // which concrete method produced the hash (for auto)
 	act         action
 }
 
@@ -84,19 +89,44 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	o.Method = method
+	if len(o.Targets) == 0 {
+		o.Targets = []string{"."}
+	}
 
-	files, err := media.Discover(ctx, o.Target, o.Extensions, o.Recursive)
+	sel, err := query.ParseSelect(o.Select)
+	if err != nil {
+		return fmt.Errorf("--select: %w", err)
+	}
+
+	files, err := media.DiscoverMany(ctx, o.Targets, o.Extensions, o.Recursive, sel)
 	if err != nil {
 		return err
 	}
-	base := media.DisplayBase(o.Target)
-	log.Info("scanning", "target", o.Target, "files", len(files), "recursive", o.Recursive, "method", string(method))
+	bases := make([]string, len(o.Targets))
+	for i, t := range o.Targets {
+		bases[i] = media.DisplayBase(t)
+	}
+	rel := func(p string) string { return relToAny(bases, p) }
+	log.Info("scanning", "targets", o.Targets, "files", len(files), "recursive", o.Recursive, "method", methodLabel(method))
+
+	// When --select narrowed the set, confirm the file list before the (costly)
+	// hashing begins.
+	if o.Select != "" && !o.AssumeYes {
+		fmt.Fprintf(o.Stdout, "%d file(s) match %q:\n", len(files), o.Select)
+		for _, f := range files {
+			fmt.Fprintf(o.Stdout, "  %s\n", rel(f))
+		}
+		if !confirmed(o, fmt.Sprintf("Hash these %d file(s)? [y/N] ", len(files))) {
+			fmt.Fprintln(o.Stdout, "Aborted; nothing hashed.")
+			return nil
+		}
+	}
 
 	// Preview each file the moment it is hashed, so progress is visible.
 	if method.WritesTag() {
 		fmt.Fprintf(o.Stdout, "Preview (%s via %s):\n", o.MetadataKey, method)
 	} else {
-		fmt.Fprintf(o.Stdout, "Preview (%s, rename only):\n", method)
+		fmt.Fprintf(o.Stdout, "Preview (%s, rename only):\n", methodLabel(method))
 	}
 
 	start := time.Now()
@@ -114,13 +144,15 @@ func Run(ctx context.Context, o Options) error {
 			t, terr := taggerFor(kind)
 			if terr != nil {
 				scanErrs++
-				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), terr)
+				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", rel(f), terr)
 				continue
 			}
 			tg = t
-		} else if method.usesFFmpeg() && kind == media.KindUnknown {
+		} else if method == MethodFFmpeg10M && kind == media.KindUnknown {
+			// The explicit ffmpeg-10m method needs a media file; auto would fall
+			// back to md5-10m, and the raw md5/sha methods take anything.
 			scanErrs++
-			fmt.Fprintf(o.Stderr, "  ! %s: unsupported file type for method %s\n", media.RelTo(base, f), method)
+			fmt.Fprintf(o.Stderr, "  ! %s: unsupported file type for method %s\n", rel(f), method)
 			continue
 		}
 
@@ -133,25 +165,27 @@ func Run(ctx context.Context, o Options) error {
 				h, trusted = v, true
 			}
 		}
+		usedMethod := method
 		if !trusted {
-			log.Debug("hashing", "file", f, "kind", kind.String(), "method", string(method))
-			hh, herr := method.digest(f, kind)
+			log.Debug("hashing", "file", f, "kind", kind.String(), "method", methodLabel(method))
+			hh, um, herr := method.resolve(f, kind)
 			if herr != nil {
 				scanErrs++
-				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", media.RelTo(base, f), herr)
+				fmt.Fprintf(o.Stderr, "  ! %s: %v\n", rel(f), herr)
 				continue
 			}
-			h = hh
+			h, usedMethod = hh, um
 		}
 
 		it := item{
-			path:    f,
-			rel:     media.RelTo(base, f),
-			kind:    kind,
-			tag:     tg,
-			hash:    h,
-			prefix:  h[:o.NameLength],
-			trusted: trusted,
+			path:       f,
+			rel:        rel(f),
+			kind:       kind,
+			tag:        tg,
+			hash:       h,
+			prefix:     h[:o.NameLength],
+			trusted:    trusted,
+			usedMethod: usedMethod,
 		}
 		if trusted {
 			it.existingTag = h // avoids a second ReadTag in classify
@@ -161,6 +195,7 @@ func Run(ctx context.Context, o Options) error {
 		} else {
 			it.newPath = media.HashedName(f, it.prefix)
 		}
+		it.newRel = rel(it.newPath)
 		if method.WritesTag() {
 			classify(o.MetadataKey, &it)
 		} else {
@@ -171,7 +206,7 @@ func Run(ctx context.Context, o Options) error {
 			bytesProcessed += st.Size()
 		}
 
-		fmt.Fprintln(o.Stdout, previewLine(base, o.MetadataKey, method, it))
+		fmt.Fprintln(o.Stdout, previewLine(o.MetadataKey, method, it))
 	}
 
 	elapsed := time.Since(start)
@@ -228,8 +263,8 @@ func Run(ctx context.Context, o Options) error {
 			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", it.rel, err)
 			continue
 		}
-		log.Info("hashed", "file", it.newPath, "hash", it.hash, "method", string(method))
-		fmt.Fprintf(o.Stdout, "  ✓ %s  ->  %s\n", it.rel, media.RelTo(base, it.newPath))
+		log.Info("hashed", "file", it.newPath, "hash", it.hash, "method", string(it.usedMethod))
+		fmt.Fprintf(o.Stdout, "  ✓ %s  ->  %s\n", it.rel, it.newRel)
 	}
 
 	fmt.Fprintln(o.Stderr, media.Summary(len(items), bytesProcessed, elapsed+time.Since(applyStart)))
@@ -294,7 +329,7 @@ func filterPending(items []item) []item {
 //	   different short hash is already in the name and is replaced
 //	~  mc.hash present but stale — rewritten (ffmpeg method only)
 //	+  no short hash in the name yet — add it
-func previewLine(base, key string, m Method, it item) string {
+func previewLine(key string, m Method, it item) string {
 	tagRenameOnly := m.WritesTag() && it.act != actionSkip && it.existingTag == it.hash
 	glyph := "+"
 	switch {
@@ -313,7 +348,7 @@ func previewLine(base, key string, m Method, it item) string {
 	case it.act == actionSkip:
 		// already named for this content — nothing more to say
 	case it.newPath != it.path:
-		line += "  ->  " + media.RelTo(base, it.newPath)
+		line += "  ->  " + it.newRel
 	default:
 		line += "  (tag only)"
 	}
@@ -323,7 +358,40 @@ func previewLine(base, key string, m Method, it item) string {
 	case !m.WritesTag() && it.hashChanged:
 		line += fmt.Sprintf("   (replaces .%s)", it.existingTag)
 	}
+	// In auto mode, flag files that fell back to md5-10m.
+	if m == MethodAuto && it.usedMethod == MethodMD510M {
+		line += "  [md5-10m]"
+	}
 	return line
+}
+
+// methodLabel is the human name of a method, expanding MethodAuto.
+func methodLabel(m Method) string {
+	if m == MethodAuto {
+		return "auto (ffmpeg-10m, md5-10m fallback)"
+	}
+	return string(m)
+}
+
+// confirmed runs o.Confirm, treating a nil callback / any error as "no".
+func confirmed(o Options, prompt string) bool {
+	if o.Confirm == nil {
+		return false
+	}
+	ok, err := o.Confirm(prompt)
+	return ok && err == nil
+}
+
+// relToAny returns path relative to whichever base keeps it inside that base,
+// picking the shortest; it falls back to the plain path.
+func relToAny(bases []string, path string) string {
+	best := path
+	for _, b := range bases {
+		if r, err := filepath.Rel(b, path); err == nil && !strings.HasPrefix(r, "..") && len(r) < len(best) {
+			best = r
+		}
+	}
+	return best
 }
 
 // short returns the first 8 characters of a hex hash for display.

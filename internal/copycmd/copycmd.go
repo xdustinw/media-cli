@@ -1,13 +1,13 @@
-// Package copycmd implements `mc copy` and `mc move`: bring every file from a
-// source (file or folder) into a target folder, resolving content duplicates
-// first.
+// Package copycmd implements `mc copy` and `mc move`: bring every file from one
+// or more sources (files or folders) into a target folder, resolving content
+// duplicates first.
 //
 // A "duplicate" is decided purely from the file name: the source file carries a
-// ".<6-hex>" short hash (written by `mc hash`) that some file already in the
-// target — anywhere under it — also carries. For each one the user chooses to
-// overwrite the target's bytes, skip the source, or rename the target file to
-// the source's name. Files with no name collision are copied/moved into the
-// target under their path relative to the source.
+// ".<6-hex>" short hash (written by `mc hash`) that some file already anywhere
+// under the target also carries. The --mode flag says what to do with every
+// such match: skip-duplicate (default), overwrite, or keep-both. Files with no
+// name collision are copied/moved into the target under their path relative to
+// their source.
 package copycmd
 
 import (
@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/xdustinw/media-cli/internal/media"
+	"github.com/xdustinw/media-cli/internal/query"
 	"github.com/xdustinw/media-cli/internal/toon"
 )
 
@@ -30,41 +31,39 @@ const hashLen = 6
 type Mode string
 
 const (
-	ModeAsk           Mode = ""               // prompt per duplicate
-	ModeOverwrite     Mode = "overwrite"      // copy source bytes over the target file
-	ModeSkipDuplicate Mode = "skip-duplicate" // leave the target, do not bring the source
-	ModeRename        Mode = "rename"         // rename the target file to the source's name
+	ModeSkipDuplicate Mode = "skip-duplicate" // default: leave the target, keep the source where it is
+	ModeOverwrite     Mode = "overwrite"      // copy the source bytes over the matching target file
+	ModeKeepBoth      Mode = "keep-both"      // bring the source in too, under its own path
 )
 
-// ParseMode accepts the short or long spelling (o/overwrite, s/skip-duplicate,
-// r/rename); "" stays ModeAsk.
+// ParseMode accepts the short or long spelling (s/skip-duplicate, o/overwrite,
+// k/keep-both); "" is the default, skip-duplicate.
 func ParseMode(s string) (Mode, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "":
-		return ModeAsk, nil
+	case "", "s", "skip", "skip-duplicate":
+		return ModeSkipDuplicate, nil
 	case "o", "overwrite":
 		return ModeOverwrite, nil
-	case "s", "skip", "skip-duplicate":
-		return ModeSkipDuplicate, nil
-	case "r", "rename":
-		return ModeRename, nil
+	case "k", "keep-both", "keepboth":
+		return ModeKeepBoth, nil
 	default:
-		return "", fmt.Errorf("unknown --mode %q (want overwrite|skip-duplicate|rename)", s)
+		return "", fmt.Errorf("unknown --mode %q (want skip-duplicate|overwrite|keep-both)", s)
 	}
 }
 
 // Options configures a Run.
 type Options struct {
-	Source string
-	Target string
-	Move   bool // false = copy
-	Mode   Mode // "" => ask per duplicate (or overwrite under AssumeYes)
+	Sources   []string
+	Target    string
+	Move      bool // false = copy
+	Mode      Mode // "" => ModeSkipDuplicate
+	Select    string
+	Recursive bool // descend into source subfolders
 
 	AssumeYes bool
 	Stdout    io.Writer
 	Stderr    io.Writer
-	Confirm   func(prompt string) (bool, error) // final go/no-go
-	Ask       func(prompt string) (Mode, error) // per-duplicate choice
+	Confirm   func(prompt string) (bool, error)
 	Logger    *slog.Logger
 }
 
@@ -75,14 +74,20 @@ func (o Options) verb() string {
 	return "copy"
 }
 
+func (o Options) verbTitle() string {
+	if o.Move {
+		return "Move"
+	}
+	return "Copy"
+}
+
 type plan struct {
 	src    string // absolute source path
-	rel    string // path relative to the source root (display + destination)
-	dst    string // computed destination (plain entries only)
-	dup    bool
-	tgt    string // matching target file (duplicates only)
+	rel    string // path relative to its source root (display + destination)
+	dst    string // computed destination under the target
+	dup    bool   // a hash duplicate exists in the target
+	tgt    string // the matching target file (duplicates only)
 	tgtRel string
-	mode   Mode // resolved action (duplicates only)
 }
 
 // Run resolves the file list, previews the plan and (on confirmation) applies
@@ -92,21 +97,22 @@ func Run(ctx context.Context, o Options) error {
 	if log == nil {
 		log = slog.Default()
 	}
-
-	absSource, _ := filepath.Abs(o.Source)
-	absTarget, _ := filepath.Abs(o.Target)
-	if absSource == absTarget {
-		return fmt.Errorf("source and target are the same path")
+	if o.Mode == "" {
+		o.Mode = ModeSkipDuplicate
+	}
+	if len(o.Sources) == 0 {
+		return fmt.Errorf("no source given")
 	}
 
-	srcFiles, err := media.WalkFiles(ctx, o.Source)
+	sel, err := query.ParseSelect(o.Select)
 	if err != nil {
-		return fmt.Errorf("reading source: %w", err)
+		return fmt.Errorf("--select: %w", err)
 	}
-	srcBase := media.DisplayBase(o.Source)
 
-	// Index the target's existing short hashes (name-based, any depth).
-	targetFiles, terr := media.WalkFiles(ctx, o.Target)
+	absTarget, _ := filepath.Abs(o.Target)
+
+	// Index the target's existing short hashes (name-based, at any depth).
+	targetFiles, terr := media.WalkFiles(ctx, o.Target, true)
 	if terr != nil && !isNotExist(terr) {
 		return fmt.Errorf("reading target: %w", terr)
 	}
@@ -119,29 +125,67 @@ func Run(ctx context.Context, o Options) error {
 		}
 	}
 
+	// Collect the source files across every source root.
+	type srcFile struct{ path, rel string }
+	var srcs []srcFile
+	var selected int
+	for _, s := range o.Sources {
+		absS, _ := filepath.Abs(s)
+		if absS == absTarget {
+			return fmt.Errorf("source and target are the same path: %s", s)
+		}
+		files, ferr := media.WalkFiles(ctx, s, o.Recursive)
+		if ferr != nil {
+			return fmt.Errorf("reading source %s: %w", s, ferr)
+		}
+		base := media.DisplayBase(s)
+		for _, f := range files {
+			if sel != nil {
+				if facts, e := media.StatFacts(f); e != nil || !sel.Match(facts) {
+					continue
+				}
+				selected++
+			}
+			srcs = append(srcs, srcFile{path: f, rel: media.RelTo(base, f)})
+		}
+	}
+	if len(srcs) == 0 {
+		fmt.Fprintln(o.Stdout, "No source files.")
+		return nil
+	}
+
+	// With --select, confirm the file list before hashing/comparing.
+	if o.Select != "" && !o.AssumeYes {
+		fmt.Fprintf(o.Stdout, "%d file(s) match %q:\n", selected, o.Select)
+		for _, sf := range srcs {
+			fmt.Fprintf(o.Stdout, "  %s\n", sf.rel)
+		}
+		if !confirmed(o, fmt.Sprintf("%s these %d file(s)? [y/N] ", o.verbTitle(), selected)) {
+			fmt.Fprintln(o.Stdout, "Aborted; nothing changed.")
+			return nil
+		}
+	}
+
 	var plains, dups []plan
 	var skipConflicts int
-	for _, sf := range srcFiles {
+	for _, sf := range srcs {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rel := media.RelTo(srcBase, sf)
-		if h := media.ShortHashInName(sf, hashLen); h != "" {
+		p := plan{src: sf.path, rel: sf.rel, dst: filepath.Join(o.Target, sf.rel)}
+		if h := media.ShortHashInName(sf.path, hashLen); h != "" {
 			if tf, ok := byHash[h]; ok {
-				dups = append(dups, plan{
-					src: sf, rel: rel, dup: true,
-					tgt: tf, tgtRel: media.RelTo(absTarget, tf),
-				})
+				p.dup, p.tgt, p.tgtRel = true, tf, media.RelTo(absTarget, tf)
+				dups = append(dups, p)
 				continue
 			}
 		}
-		dst := filepath.Join(o.Target, rel)
-		if _, err := statFile(dst); err == nil {
-			fmt.Fprintf(o.Stderr, "  ! %s: already exists at destination and is not a hash duplicate; skipped\n", rel)
+		if _, err := statFile(p.dst); err == nil {
+			fmt.Fprintf(o.Stderr, "  ! %s: already at the destination (not a hash duplicate); skipped\n", sf.rel)
 			skipConflicts++
 			continue
 		}
-		plains = append(plains, plan{src: sf, rel: rel, dst: dst})
+		plains = append(plains, p)
 	}
 
 	if len(plains) == 0 && len(dups) == 0 {
@@ -149,27 +193,10 @@ func Run(ctx context.Context, o Options) error {
 		return conflictErr(skipConflicts)
 	}
 
-	// Resolve each duplicate's action.
-	for i := range dups {
-		mode, rerr := o.resolve(&dups[i])
-		if rerr != nil {
-			return rerr
-		}
-		dups[i].mode = mode
-	}
-
 	preview(o, plains, dups)
 
 	if !o.AssumeYes {
-		ok := false
-		if o.Confirm != nil {
-			var cErr error
-			ok, cErr = o.Confirm(fmt.Sprintf("\nProceed with %s? [y/N] ", o.verb()))
-			if cErr != nil {
-				return cErr
-			}
-		}
-		if !ok {
+		if !confirmed(o, fmt.Sprintf("\nProceed with %s? [y/N] ", o.verb())) {
 			fmt.Fprintln(o.Stdout, "Aborted; nothing changed.")
 			return conflictErr(skipConflicts)
 		}
@@ -179,12 +206,11 @@ func Run(ctx context.Context, o Options) error {
 	var done, skipped int
 	var bytes int64
 	var applyErrs int
-	all := append(append([]plan{}, plains...), dups...)
-	for _, p := range all {
+	for _, p := range append(append([]plan{}, plains...), dups...) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if p.dup && p.mode == ModeSkipDuplicate {
+		if p.dup && o.Mode == ModeSkipDuplicate {
 			skipped++
 			continue
 		}
@@ -197,7 +223,7 @@ func Run(ctx context.Context, o Options) error {
 		bytes += n
 		done++
 		fmt.Fprintf(o.Stdout, "  ✓ %s\n", p.rel)
-		log.Info(o.verb(), "src", p.src, "dup", p.dup, "mode", string(p.mode))
+		log.Info(o.verb(), "src", p.src, "dup", p.dup, "mode", string(o.Mode))
 	}
 
 	line := media.Summary(done, bytes, time.Since(start))
@@ -211,26 +237,12 @@ func Run(ctx context.Context, o Options) error {
 	return conflictErr(skipConflicts)
 }
 
-// resolve picks the Mode for one duplicate.
-func (o Options) resolve(p *plan) (Mode, error) {
-	if o.Mode != ModeAsk {
-		return o.Mode, nil
-	}
-	if o.AssumeYes {
-		return ModeOverwrite, nil
-	}
-	if o.Ask == nil {
-		return ModeSkipDuplicate, nil
-	}
-	return o.Ask(fmt.Sprintf("  duplicate: %s  <->  %s\n    [o]verwrite target / [s]kip source / [r]ename target ? ",
-		p.rel, p.tgtRel))
-}
-
 func preview(o Options, plains, dups []plan) {
 	doc := &toon.Document{}
 	doc.AddField("operation", o.verb())
-	doc.AddField("source", o.Source)
+	doc.AddField("sources", strings.Join(o.Sources, ", "))
 	doc.AddField("target", o.Target)
+	doc.AddField("duplicate-mode", string(o.Mode))
 
 	if len(plains) > 0 {
 		t := toon.Table{Name: o.verb(), Columns: []string{"from", "to"}}
@@ -240,7 +252,7 @@ func preview(o Options, plains, dups []plan) {
 		doc.AddTable(t)
 	}
 	if len(dups) > 0 {
-		t := toon.Table{Name: "duplicates", Columns: []string{"source", "target", "action"}}
+		t := toon.Table{Name: "duplicates", Columns: []string{"source", "matches", "action"}}
 		for _, p := range dups {
 			t.Rows = append(t.Rows, []string{p.rel, p.tgtRel, dupAction(o, p)})
 		}
@@ -249,39 +261,45 @@ func preview(o Options, plains, dups []plan) {
 	fmt.Fprint(o.Stdout, doc.String())
 }
 
-// dupAction is the human phrase shown in the preview for a resolved duplicate.
+// dupAction is the human phrase shown in the preview for a duplicate.
 func dupAction(o Options, p plan) string {
-	switch p.mode {
+	switch o.Mode {
 	case ModeOverwrite:
-		s := "overwrite target bytes"
 		if o.Move {
-			s += ", delete source"
+			return "overwrite target, delete source"
 		}
-		return s
-	case ModeRename:
-		s := "rename target -> " + filepath.Base(p.src)
+		return "overwrite target"
+	case ModeKeepBoth:
 		if o.Move {
-			s += ", delete source"
+			return "keep both (move source in as " + filepath.Base(p.dst) + ")"
 		}
-		return s
+		return "keep both (copy source in as " + filepath.Base(p.dst) + ")"
 	default:
+		if o.Move {
+			return "skip (source kept, not deleted)"
+		}
 		return "skip source"
 	}
 }
 
 // apply performs one plan entry and returns the number of bytes written.
 func apply(o Options, p plan) (int64, error) {
-	if !p.dup {
-		size := fileSize(p.src)
+	size := fileSize(p.src)
+
+	if !p.dup || o.Mode == ModeKeepBoth {
+		// Plain bring-in (keep-both duplicates behave like plain files, landing
+		// at their own destination path).
+		if _, err := statFile(p.dst); err == nil {
+			return 0, fmt.Errorf("destination %s already exists", filepath.Base(p.dst))
+		}
 		if o.Move {
 			return size, media.MoveFile(p.src, p.dst)
 		}
 		return size, media.CopyFile(p.src, p.dst)
 	}
 
-	switch p.mode {
+	switch o.Mode {
 	case ModeOverwrite:
-		size := fileSize(p.src)
 		if err := media.CopyFile(p.src, p.tgt); err != nil {
 			return 0, err
 		}
@@ -289,25 +307,18 @@ func apply(o Options, p plan) (int64, error) {
 			return size, removeFile(p.src)
 		}
 		return size, nil
-
-	case ModeRename:
-		newName := filepath.Join(filepath.Dir(p.tgt), filepath.Base(p.src))
-		if newName != p.tgt {
-			if _, err := statFile(newName); err == nil {
-				return 0, fmt.Errorf("cannot rename target to %s: already exists", filepath.Base(newName))
-			}
-			if err := renameFile(p.tgt, newName); err != nil {
-				return 0, err
-			}
-		}
-		if o.Move {
-			return 0, removeFile(p.src)
-		}
-		return 0, nil
-
-	default: // ModeSkipDuplicate
+	default: // ModeSkipDuplicate — handled by the caller; nothing to do
 		return 0, nil
 	}
+}
+
+// confirmed runs o.Confirm; a nil callback or any error counts as "no".
+func confirmed(o Options, prompt string) bool {
+	if o.Confirm == nil {
+		return false
+	}
+	ok, err := o.Confirm(prompt)
+	return ok && err == nil
 }
 
 func conflictErr(n int) error {

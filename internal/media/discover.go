@@ -12,10 +12,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/xdustinw/media-cli/internal/query"
 )
 
-// ErrNoMediaFiles is returned by Discover when the target contains no files
-// matching the configured extensions.
+// ErrNoMediaFiles is returned when a target contains no files matching the
+// configured extensions (and the --select filter, when given).
 var ErrNoMediaFiles = errors.New("no media files found")
 
 // Discover resolves target into a sorted list of media file paths.
@@ -28,6 +30,51 @@ var ErrNoMediaFiles = errors.New("no media files found")
 //
 // The walk stops early and returns ctx.Err() if ctx is cancelled.
 func Discover(ctx context.Context, target string, exts []string, recursive bool) ([]string, error) {
+	out, err := discoverOne(ctx, target, exts, recursive)
+	if err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, ErrNoMediaFiles
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// DiscoverMany resolves several targets (each a file or folder) into one sorted,
+// de-duplicated file list. Folders are filtered by exts; sel (when non-nil) is
+// matched against each file's filesystem Facts. recursive controls folder
+// descent for every target.
+func DiscoverMany(ctx context.Context, targets []string, exts []string, recursive bool, sel *query.Selector) ([]string, error) {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, t := range targets {
+		one, err := discoverOne(ctx, t, exts, recursive)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range one {
+			if _, dup := seen[f]; dup {
+				continue
+			}
+			if sel != nil {
+				facts, ferr := StatFacts(f)
+				if ferr != nil || !sel.Match(facts) {
+					continue
+				}
+			}
+			seen[f] = struct{}{}
+			out = append(out, f)
+		}
+	}
+	if len(out) == 0 {
+		return nil, ErrNoMediaFiles
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func discoverOne(ctx context.Context, target string, exts []string, recursive bool) ([]string, error) {
 	info, err := os.Stat(target)
 	if err != nil {
 		return nil, err
@@ -78,18 +125,14 @@ func Discover(ctx context.Context, target string, exts []string, recursive bool)
 			}
 		}
 	}
-
-	if len(out) == 0 {
-		return nil, ErrNoMediaFiles
-	}
-	sort.Strings(out)
 	return out, nil
 }
 
-// WalkFiles returns every regular file under root, recursively and sorted. When
-// root is a single file it returns just that file. The tool's own temp files
-// (".mc-*") are skipped. Unlike Discover it does not filter by extension.
-func WalkFiles(ctx context.Context, root string) ([]string, error) {
+// WalkFiles returns the regular files under root, sorted. When root is a single
+// file it returns just that file. When recursive is false only root's own files
+// are returned. The tool's own temp files (".mc-*") are skipped. Unlike Discover
+// it does not filter by extension.
+func WalkFiles(ctx context.Context, root string, recursive bool) ([]string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return nil, err
@@ -107,6 +150,12 @@ func WalkFiles(ctx context.Context, root string) ([]string, error) {
 		}
 		if strings.HasPrefix(d.Name(), ".mc-") {
 			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			if !recursive && path != filepath.Clean(root) {
 				return filepath.SkipDir
 			}
 			return nil

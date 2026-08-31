@@ -37,133 +37,156 @@ func run(t *testing.T, o Options) (string, string, error) {
 	if o.Confirm == nil {
 		o.Confirm = func(string) (bool, error) { return true, nil }
 	}
+	if !o.Recursive {
+		o.Recursive = true // default in tests unless a case overrides
+	}
 	err := Run(context.Background(), o)
 	return out.String(), errb.String(), err
 }
 
 func TestParseMode(t *testing.T) {
 	for in, want := range map[string]Mode{
-		"":               ModeAsk,
-		"o":              ModeOverwrite,
-		"overwrite":      ModeOverwrite,
+		"":               ModeSkipDuplicate,
 		"s":              ModeSkipDuplicate,
 		"skip-duplicate": ModeSkipDuplicate,
-		"r":              ModeRename,
-		"RENAME":         ModeRename,
+		"o":              ModeOverwrite,
+		"overwrite":      ModeOverwrite,
+		"k":              ModeKeepBoth,
+		"KEEP-BOTH":      ModeKeepBoth,
 	} {
 		if got, err := ParseMode(in); err != nil || got != want {
 			t.Errorf("ParseMode(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	if _, err := ParseMode("merge"); err == nil {
-		t.Fatal("expected an error for an unknown mode")
+	if _, err := ParseMode("rename"); err == nil {
+		t.Fatal("rename is no longer a mode")
 	}
 }
 
-func TestCopyPlainAndRenameDuplicate(t *testing.T) {
+func TestCopyPlainFilesFromMultipleSources(t *testing.T) {
 	root := t.TempDir()
-	src := filepath.Join(root, "src")
+	s1 := filepath.Join(root, "s1")
+	s2 := filepath.Join(root, "s2")
 	dst := filepath.Join(root, "dst")
-	write(t, filepath.Join(src, "a.aaaaaa.jpg"), "SRC-A")
-	write(t, filepath.Join(src, "sub", "b.bbbbbb.jpg"), "SRC-B")
-	write(t, filepath.Join(dst, "keep", "old.aaaaaa.jpg"), "TGT-A")
+	write(t, filepath.Join(s1, "a.aaaaaa.jpg"), "A")
+	write(t, filepath.Join(s2, "sub", "b.bbbbbb.jpg"), "B")
 
-	out, _, err := run(t, Options{Source: src, Target: dst, Mode: ModeRename})
-	if err != nil {
+	if _, _, err := run(t, Options{Sources: []string{s1, s2}, Target: dst}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "rename target -> a.aaaaaa.jpg") {
-		t.Fatalf("preview missing rename action:\n%s", out)
+	if read(t, filepath.Join(dst, "a.aaaaaa.jpg")) != "A" {
+		t.Fatal("source 1 file missing")
 	}
-
-	// Plain file copied under its source-relative path.
-	if got := read(t, filepath.Join(dst, "sub", "b.bbbbbb.jpg")); got != "SRC-B" {
-		t.Fatalf("plain copy = %q", got)
-	}
-	// Duplicate: target renamed to the source's name, same folder, bytes kept.
-	if exists(filepath.Join(dst, "keep", "old.aaaaaa.jpg")) {
-		t.Fatal("old target name should be gone")
-	}
-	if got := read(t, filepath.Join(dst, "keep", "a.aaaaaa.jpg")); got != "TGT-A" {
-		t.Fatalf("rename kept wrong bytes: %q", got)
-	}
-	// Copy leaves the source in place.
-	if !exists(filepath.Join(src, "a.aaaaaa.jpg")) {
-		t.Fatal("copy must not remove the source")
+	if read(t, filepath.Join(dst, "sub", "b.bbbbbb.jpg")) != "B" {
+		t.Fatal("source 2 nested file missing")
 	}
 }
 
-func TestMoveOverwriteDuplicate(t *testing.T) {
-	root := t.TempDir()
-	src := filepath.Join(root, "src")
-	dst := filepath.Join(root, "dst")
-	write(t, filepath.Join(src, "new.abcabc.mp4"), "NEW-BYTES")
-	write(t, filepath.Join(dst, "d", "have.abcabc.mp4"), "OLD-BYTES")
-
-	if _, _, err := run(t, Options{Source: src, Target: dst, Move: true, Mode: ModeOverwrite}); err != nil {
-		t.Fatal(err)
-	}
-	if got := read(t, filepath.Join(dst, "d", "have.abcabc.mp4")); got != "NEW-BYTES" {
-		t.Fatalf("overwrite kept old bytes: %q", got)
-	}
-	if exists(filepath.Join(src, "new.abcabc.mp4")) {
-		t.Fatal("move must remove the source after overwrite")
-	}
-}
-
-func TestSkipDuplicateLeavesEverything(t *testing.T) {
+func TestSkipDuplicateIsDefaultAndKeepsSourceOnMove(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	dst := filepath.Join(root, "dst")
 	write(t, filepath.Join(src, "x.ffffff.png"), "SRC")
-	write(t, filepath.Join(dst, "y.ffffff.png"), "TGT")
+	write(t, filepath.Join(dst, "have", "y.ffffff.png"), "TGT")
 
-	_, errOut, err := run(t, Options{Source: src, Target: dst, Move: true, Mode: ModeSkipDuplicate})
+	_, errOut, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true}) // no Mode => skip
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read(t, filepath.Join(dst, "y.ffffff.png")) != "TGT" {
+	if read(t, filepath.Join(dst, "have", "y.ffffff.png")) != "TGT" {
 		t.Fatal("skip must not touch the target")
 	}
 	if !exists(filepath.Join(src, "x.ffffff.png")) {
-		t.Fatal("skip on move must leave the source")
+		t.Fatal("move + skip-duplicate must leave the source in place")
 	}
 	if !strings.Contains(errOut, "1 duplicate(s) skipped") {
 		t.Fatalf("summary should note the skip:\n%s", errOut)
 	}
 }
 
-func TestAskCallbackConsulted(t *testing.T) {
+func TestOverwriteDuplicateOnMove(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	dst := filepath.Join(root, "dst")
-	write(t, filepath.Join(src, "a.111111.jpg"), "A")
-	write(t, filepath.Join(src, "b.222222.jpg"), "B")
-	write(t, filepath.Join(dst, "a0.111111.jpg"), "A-OLD")
-	write(t, filepath.Join(dst, "b0.222222.jpg"), "B-OLD")
+	write(t, filepath.Join(src, "new.abcabc.mp4"), "NEW")
+	write(t, filepath.Join(dst, "d", "old.abcabc.mp4"), "OLD")
 
-	asked := 0
-	_, _, err := run(t, Options{
-		Source: src, Target: dst,
-		Ask: func(string) (Mode, error) {
-			asked++
-			if asked == 1 {
-				return ModeOverwrite, nil
-			}
-			return ModeSkipDuplicate, nil
-		},
+	if _, _, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true, Mode: ModeOverwrite}); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(dst, "d", "old.abcabc.mp4")) != "NEW" {
+		t.Fatal("overwrite kept old bytes")
+	}
+	if exists(filepath.Join(src, "new.abcabc.mp4")) {
+		t.Fatal("move + overwrite must remove the source")
+	}
+}
+
+func TestKeepBothBringsDuplicateInToo(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "mine.dddddd.jpg"), "MINE")
+	write(t, filepath.Join(dst, "existing", "theirs.dddddd.jpg"), "THEIRS")
+
+	if _, _, err := run(t, Options{Sources: []string{src}, Target: dst, Mode: ModeKeepBoth}); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(dst, "existing", "theirs.dddddd.jpg")) != "THEIRS" {
+		t.Fatal("keep-both must not touch the existing target file")
+	}
+	if read(t, filepath.Join(dst, "mine.dddddd.jpg")) != "MINE" {
+		t.Fatal("keep-both must also bring the source in under its own path")
+	}
+}
+
+func TestSelectFiltersAndConfirms(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "3-keep.aaaaaa.jpg"), "K")
+	write(t, filepath.Join(src, "9-drop.bbbbbb.jpg"), "D")
+
+	asked := ""
+	out, _, err := run(t, Options{
+		Sources: []string{src}, Target: dst, Select: "name=3*",
+		Confirm: func(p string) (bool, error) { asked += p; return true, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asked != 2 {
-		t.Fatalf("Ask called %d times, want 2", asked)
+	if !strings.Contains(asked, "Copy these 1 file(s)?") {
+		t.Fatalf("expected a pre-scan confirmation for --select, got prompts:\n%s", asked)
 	}
-	if read(t, filepath.Join(dst, "a0.111111.jpg")) != "A" {
-		t.Fatal("first duplicate should have been overwritten")
+	if !exists(filepath.Join(dst, "3-keep.aaaaaa.jpg")) {
+		t.Fatal("selected file not copied")
 	}
-	if read(t, filepath.Join(dst, "b0.222222.jpg")) != "B-OLD" {
-		t.Fatal("second duplicate should have been skipped")
+	if exists(filepath.Join(dst, "9-drop.bbbbbb.jpg")) {
+		t.Fatalf("non-matching file was copied:\n%s", out)
+	}
+}
+
+func TestNonRecursiveSource(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "top.aaaaaa.jpg"), "TOP")
+	write(t, filepath.Join(src, "sub", "deep.bbbbbb.jpg"), "DEEP")
+
+	var out, errb bytes.Buffer
+	err := Run(context.Background(), Options{
+		Sources: []string{src}, Target: dst, Recursive: false,
+		Stdout: &out, Stderr: &errb,
+		Confirm: func(string) (bool, error) { return true, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists(filepath.Join(dst, "top.aaaaaa.jpg")) {
+		t.Fatal("top-level file should be copied")
+	}
+	if exists(filepath.Join(dst, "sub", "deep.bbbbbb.jpg")) {
+		t.Fatal("--nr must not descend into subfolders")
 	}
 }
 
@@ -171,14 +194,14 @@ func TestPlainPathCollisionSkipped(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	dst := filepath.Join(root, "dst")
-	write(t, filepath.Join(src, "note.txt"), "SRC") // no short hash in the name
+	write(t, filepath.Join(src, "note.txt"), "SRC") // no short hash
 	write(t, filepath.Join(dst, "note.txt"), "TGT")
 
-	_, errOut, err := run(t, Options{Source: src, Target: dst, Move: true})
+	_, errOut, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true})
 	if err == nil {
-		t.Fatal("expected a non-nil error for the skipped conflict")
+		t.Fatal("expected an error for the skipped conflict")
 	}
-	if !strings.Contains(errOut, "already exists at destination") {
+	if !strings.Contains(errOut, "already at the destination") {
 		t.Fatalf("missing conflict note:\n%s", errOut)
 	}
 	if read(t, filepath.Join(dst, "note.txt")) != "TGT" {
@@ -191,10 +214,9 @@ func TestConfirmAbortChangesNothing(t *testing.T) {
 	src := filepath.Join(root, "src")
 	dst := filepath.Join(root, "dst")
 	write(t, filepath.Join(src, "a.aaaaaa.jpg"), "SRC")
-	write(t, filepath.Join(dst, "keep", "b.aaaaaa.jpg"), "TGT")
 
 	out, _, err := run(t, Options{
-		Source: src, Target: dst, Mode: ModeOverwrite,
+		Sources: []string{src}, Target: dst,
 		Confirm: func(string) (bool, error) { return false, nil },
 	})
 	if err != nil {
@@ -203,7 +225,7 @@ func TestConfirmAbortChangesNothing(t *testing.T) {
 	if !strings.Contains(out, "Aborted") {
 		t.Fatalf("expected an abort message:\n%s", out)
 	}
-	if read(t, filepath.Join(dst, "keep", "b.aaaaaa.jpg")) != "TGT" {
-		t.Fatal("abort must not change the target")
+	if exists(filepath.Join(dst, "a.aaaaaa.jpg")) {
+		t.Fatal("abort must not copy anything")
 	}
 }

@@ -12,50 +12,54 @@ import (
 )
 
 var (
-	flagCopyMode string
-	flagCopyYes  bool
-	flagMoveMode string
-	flagMoveYes  bool
+	flagCopyMode   string
+	flagCopyYes    bool
+	flagCopyNR     bool
+	flagCopySelect string
+	flagMoveMode   string
+	flagMoveYes    bool
+	flagMoveNR     bool
+	flagMoveSelect string
 )
 
-const copyMoveLong = `%[1]s brings every file from <source> (a file or folder) into <target>,
-recursively. A file is put at <target>/<path relative to source>.
+const copyMoveLong = `%[1]s brings every file from the source(s) — files and/or folders — into
+<target>, at <target>/<path relative to that source>. Folders are scanned
+recursively unless --nr is passed.
 
 Before anything is written, each source file's ".<6-hex>" short hash (as written
 by 'mc hash') is compared against the short hashes of the files already under
-<target>, at any depth. When a match is found you resolve the duplicate:
+<target>, at any depth. --mode says what to do with every match:
 
-  o / overwrite       copy the source bytes over the matching target file
-                      (the target keeps its folder and name)
-  s / skip-duplicate  leave the target as it is; do not bring the source in
-  r / rename          rename the matching target file to the source's name
-                      (its folder is unchanged); the bytes are left alone
+  s / skip-duplicate  (default) leave the target; keep the source where it is
+  o / overwrite        copy the source bytes over the matching target file
+  k / keep-both        bring the source in too, under its own name/path
 
-Pass -m/--mode to apply one choice to every duplicate. With -y the plan is
-applied without the final confirmation and duplicates default to overwrite.
+--select filters the source files (fields: name, path, ext, size, modifiedAt,
+kind); you are shown the matches and asked to confirm before the hash compare,
+unless -y. -y also skips the final confirmation.
 %[2]s`
 
 var copyCmd = &cobra.Command{
-	Use:   "copy <source> <target>",
-	Short: "Copy files into a folder, resolving name-hash duplicates first",
-	Long:  fmt.Sprintf(copyMoveLong, "copy", "Files are copied; the source is left in place."),
-	Args:  cobra.ExactArgs(2),
+	Use:   "copy <source> [<source> ...] <target>",
+	Short: "Copy files into a folder, resolving name-hash duplicates",
+	Long:  fmt.Sprintf(copyMoveLong, "copy", "Files are copied; sources are left in place."),
+	Args:  cobra.MinimumNArgs(2),
 	RunE:  runCopyMove(false),
 }
 
 var moveCmd = &cobra.Command{
-	Use:   "move <source> <target>",
-	Short: "Move files into a folder, resolving name-hash duplicates first",
-	Long:  fmt.Sprintf(copyMoveLong, "move", "Files are moved; a source file is removed once its target is written (skipped duplicates are left in the source)."),
-	Args:  cobra.ExactArgs(2),
+	Use:   "move <source> [<source> ...] <target>",
+	Short: "Move files into a folder, resolving name-hash duplicates",
+	Long:  fmt.Sprintf(copyMoveLong, "move", "Files are moved; a source is removed once its target is written. On a skipped duplicate the source is left in place (not deleted)."),
+	Args:  cobra.MinimumNArgs(2),
 	RunE:  runCopyMove(true),
 }
 
 func runCopyMove(move bool) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		rawMode, yes := flagCopyMode, flagCopyYes
+		rawMode, yes, nr, sel := flagCopyMode, flagCopyYes, flagCopyNR, flagCopySelect
 		if move {
-			rawMode, yes = flagMoveMode, flagMoveYes
+			rawMode, yes, nr, sel = flagMoveMode, flagMoveYes, flagMoveNR, flagMoveSelect
 		}
 
 		mode, err := copycmd.ParseMode(rawMode)
@@ -66,59 +70,49 @@ func runCopyMove(move bool) func(*cobra.Command, []string) error {
 			vip.Set(config.KeyAssumeYes, yes)
 		}
 
-		// One reader for the whole command: bufio reads ahead, so a second
-		// reader on the same stdin would race it for buffered input.
+		sources, target := args[:len(args)-1], args[len(args)-1]
+
 		in := bufio.NewReader(cmd.InOrStdin())
 		out := cmd.OutOrStdout()
-		readLine := func(prompt string) (string, bool) {
-			fmt.Fprint(out, prompt)
-			line, rerr := in.ReadString('\n')
-			if rerr != nil && line == "" {
-				return "", false
-			}
-			return strings.ToLower(strings.TrimSpace(line)), true
-		}
-
 		return copycmd.Run(cmd.Context(), copycmd.Options{
-			Source:    args[0],
-			Target:    args[1],
+			Sources:   sources,
+			Target:    target,
 			Move:      move,
 			Mode:      mode,
+			Select:    sel,
+			Recursive: !nr,
 			AssumeYes: vip.GetBool(config.KeyAssumeYes),
 			Stdout:    out,
 			Stderr:    cmd.ErrOrStderr(),
 			Confirm: func(prompt string) (bool, error) {
-				a, ok := readLine(prompt)
-				return ok && (a == "y" || a == "yes"), nil
-			},
-			Ask: func(prompt string) (copycmd.Mode, error) {
-				for {
-					a, ok := readLine(prompt)
-					if !ok {
-						return copycmd.ModeSkipDuplicate, nil
-					}
-					switch a {
-					case "o", "overwrite":
-						return copycmd.ModeOverwrite, nil
-					case "s", "skip", "skip-duplicate":
-						return copycmd.ModeSkipDuplicate, nil
-					case "r", "rename":
-						return copycmd.ModeRename, nil
-					}
-					fmt.Fprintln(out, "  please answer o, s or r")
+				fmt.Fprint(out, prompt)
+				line, rerr := in.ReadString('\n')
+				if rerr != nil && line == "" {
+					return false, nil
 				}
+				a := strings.ToLower(strings.TrimSpace(line))
+				return a == "y" || a == "yes", nil
 			},
 		})
 	}
 }
 
 func init() {
-	copyCmd.Flags().StringVarP(&flagCopyMode, "mode", "m", "",
-		"resolve every duplicate this way: overwrite|skip-duplicate|rename (o|s|r)")
-	copyCmd.Flags().BoolVarP(&flagCopyYes, "yes", "y", false, "apply without confirmation (duplicates default to overwrite)")
-	moveCmd.Flags().StringVarP(&flagMoveMode, "mode", "m", "",
-		"resolve every duplicate this way: overwrite|skip-duplicate|rename (o|s|r)")
-	moveCmd.Flags().BoolVarP(&flagMoveYes, "yes", "y", false, "apply without confirmation (duplicates default to overwrite)")
-	rootCmd.AddCommand(copyCmd)
-	rootCmd.AddCommand(moveCmd)
+	for _, c := range []struct {
+		cmd  *cobra.Command
+		mode *string
+		yes  *bool
+		nr   *bool
+		sel  *string
+	}{
+		{copyCmd, &flagCopyMode, &flagCopyYes, &flagCopyNR, &flagCopySelect},
+		{moveCmd, &flagMoveMode, &flagMoveYes, &flagMoveNR, &flagMoveSelect},
+	} {
+		c.cmd.Flags().StringVarP(c.mode, "mode", "m", "",
+			"duplicate handling: skip-duplicate (default), overwrite, keep-both (s|o|k)")
+		c.cmd.Flags().BoolVarP(c.yes, "yes", "y", false, "skip confirmations")
+		c.cmd.Flags().BoolVar(c.nr, "nr", false, "non-recursive: skip source subfolders")
+		c.cmd.Flags().StringVar(c.sel, "select", "", "only act on source files matching this filter")
+		rootCmd.AddCommand(c.cmd)
+	}
 }

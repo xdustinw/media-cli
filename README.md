@@ -76,28 +76,29 @@ Global flags: `-v/--verbose`, `--debug`, `--config <path>`.
 ### `mc hash`
 
 ```
-mc hash [file or folder] [-m <method>] [-y] [-f] [-r]   # target defaults to the current directory
+mc hash [file or folder ...] [-m <method>] [--select=<expr>] [-y] [-f] [--nr]
 ```
 
 Fingerprint media by content and rename each file to
 `<name>.<first 6 of hash>.<ext>` (replacing a short hash already in the name).
-Given a folder, only its own files are processed; pass `-r` / `--recursive` to
-descend into subfolders.
+One or more files/folders may be given (default: current directory); folders are
+scanned **recursively** unless `--nr` is passed.
 
 ```bash
-mc hash                       # current directory, default method (ffmpeg-10m)
-mc hash movie.mp4             # one file, confirm changes
-mc hash -r ~/Videos           # include subfolders
-mc hash ~/Photos -y           # no confirmation prompt
+mc hash                       # current directory, recursively, default method
+mc hash movie.mp4 clip.mkv    # several explicit files
+mc hash --nr ~/Photos         # this folder only, no subfolders
 mc hash ~/Videos -m ffmpeg    # full metadata-independent hash + write mc.hash
 mc hash ~/Videos -m md5-10m   # fastest: md5 of the first 10 MB of file bytes
+mc hash ~/Photos --select='name=IMG_*'   # only matching files (asks first)
 ```
 
 **`-m` / `--method`** — how the fingerprint is computed:
 
 | method | hashes | speed | writes `mc.hash`? |
 | --- | --- | --- | --- |
-| `ffmpeg-10m` *(default)* | md5 of the first ~10 MB of the video+audio stream | fast | no |
+| *(default)* | `ffmpeg-10m`, then `md5-10m` for any file ffmpeg can't read | fast | no |
+| `ffmpeg-10m` | md5 of the first ~10 MB of the video+audio stream | fast | no |
 | `ffmpeg` | md5 of the whole video+audio stream (video) or decoded pixels (images); metadata ignored | slow | **yes** |
 | `md5` / `sha` | md5 / sha-256 of the raw file bytes (metadata included) | medium | no |
 | `md5-10m` / `sha-10m` | md5 / sha-256 of the first 10 MB of file bytes | fastest | no |
@@ -106,12 +107,16 @@ Only `ffmpeg` reads or writes file metadata; every other method just renames.
 `ffmpeg` and `ffmpeg-10m` treat two files that differ only in metadata as
 identical; `md5` / `sha` do not (they see the raw bytes).
 
+**`--select`** filters the files (`name`, `path`, `ext`, `size`, `modifiedAt`,
+`kind`); you're shown the matches and asked to confirm before hashing, unless
+`-y`.
+
 As each file is processed it prints a preview line — `+` add hash to name, `»`
 replace a different hash already in the name (or, for `ffmpeg`, rename only), `~`
-re-tag stale, `=` already current:
+re-tag stale, `=` already current; `[md5-10m]` marks a default-mode fallback:
 
 ```
-Preview (ffmpeg-10m, rename only):
+Preview (auto (ffmpeg-10m, md5-10m fallback), rename only):
   + trip/IMG_1.jpg  6cb96fb66986b44f505831c54f69598e  ->  trip/IMG_1.6cb96f.jpg
   = trip/IMG_2.fbc6ec.jpg  fbc6ec44...
 ```
@@ -210,36 +215,38 @@ mc set 'artist="Doe, Jane"' ~/Photos --select='artist=old-name'   # quote to kee
 ### `mc copy` / `mc move`
 
 ```
-mc copy <source> <target> [-m <mode>] [-y]
-mc move <source> <target> [-m <mode>] [-y]
+mc copy <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--nr]
+mc move <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--nr]
 ```
 
-Bring every file from `<source>` (a file or folder) into `<target>`,
-recursively — each file lands at `<target>/<path relative to source>`. `move`
-removes a source file once its target is written; `copy` leaves it.
+Bring every file from the source(s) — files and/or folders — into `<target>`,
+each landing at `<target>/<path relative to that source>`. Folders are scanned
+recursively unless `--nr` is passed. `move` removes a source once its target is
+written; `copy` leaves it.
 
 Before writing anything, each source file's `.<6-hex>` short hash (from
 [`mc hash`](#mc-hash)) is looked up among the short hashes of the files
-**already anywhere under `<target>`**. Each match is a *duplicate* and you decide
-what to do with it:
+**already anywhere under `<target>`**. `-m` / `--mode` says what to do with every
+match:
 
-| choice | effect |
+| mode | effect |
 | --- | --- |
-| `o` / `overwrite` | copy the source bytes over the matching target file (it keeps its folder **and** name) |
-| `s` / `skip-duplicate` | leave the target; don't bring the source in (`move` leaves the source too) |
-| `r` / `rename` | rename the matching target file to the source's name (folder unchanged); bytes untouched |
+| `s` / `skip-duplicate` *(default)* | leave the target; keep the source where it is (`move` does **not** delete a skipped source) |
+| `o` / `overwrite` | copy the source bytes over the matching target file (it keeps its folder and name) |
+| `k` / `keep-both` | bring the source in too, at `<target>/<rel>`, alongside the existing file |
 
 ```bash
-mc copy ~/incoming ~/library                 # ask per duplicate
-mc move ~/incoming ~/library -m rename        # one choice for all duplicates
-mc move ~/incoming ~/library -y               # no prompts; duplicates -> overwrite
+mc copy ~/incoming ~/library                  # skip duplicates (default)
+mc move ~/cam1 ~/cam2 ~/library -m keep-both   # merge two folders, keep every copy
+mc move ~/incoming ~/library -y                # no prompts
+mc copy ~/incoming ~/library --select='name=IMG_*'
 ```
 
-`-m` / `--mode` applies one choice to every duplicate; without it you're asked
-per file. `-y` skips the final confirmation and makes duplicates default to
-`overwrite`. A source file whose destination path is already taken by a
-*non-duplicate* is skipped (never overwritten). The full plan is shown as a TOON
-preview before anything happens.
+**`--select`** filters the source files (`name`, `path`, `ext`, `size`,
+`modifiedAt`, `kind`); you're shown the matches and asked to confirm before the
+hash compare, unless `-y`. `-y` also skips the final confirmation. A source file
+whose destination path is already taken by a *non-duplicate* is skipped (never
+overwritten). The full plan is shown as a TOON preview before anything happens.
 
 ### `mc info`
 

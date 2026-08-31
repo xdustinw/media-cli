@@ -16,8 +16,8 @@ import (
 )
 
 func TestParseMethod(t *testing.T) {
-	if m, err := ParseMethod(""); err != nil || m != DefaultMethod {
-		t.Fatalf("empty => %q, %v (want %q)", m, err, DefaultMethod)
+	if m, err := ParseMethod(""); err != nil || m != MethodAuto {
+		t.Fatalf("empty => %q, %v (want auto)", m, err)
 	}
 	for _, ok := range []string{"ffmpeg", "FFMPEG", " md5 ", "sha-10m"} {
 		if _, err := ParseMethod(ok); err != nil {
@@ -33,7 +33,7 @@ func runMethod(t *testing.T, root string, method Method) (stdout string) {
 	t.Helper()
 	var o, e bytes.Buffer
 	err := Run(context.Background(), Options{
-		Target: root, Extensions: []string{".png"}, Method: method,
+		Targets: []string{root}, Extensions: []string{".png"}, Method: method,
 		NameLength: 6, AssumeYes: true,
 		Stdout: &o, Stderr: &e, Logger: quietLogger(),
 	})
@@ -98,6 +98,78 @@ func TestMethod10MHashesPrefixOnly(t *testing.T) {
 	if capped != hex.EncodeToString(want[:]) {
 		t.Fatalf("md5-10m = %s, want md5(first 10 MiB) = %x", capped, want)
 	}
+}
+
+// TestAutoFallsBackToMD5: the default (auto) method hashes a non-media file
+// with md5-10m after the ffmpeg attempt fails.
+func TestAutoFallsBackToMD5(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.bin"), []byte("plain data, not media"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var o, e bytes.Buffer
+	err := Run(context.Background(), Options{
+		Targets: []string{root}, Extensions: []string{".bin"}, // Method zero value = MethodAuto
+		NameLength: 6, AssumeYes: true, Recursive: true,
+		Stdout: &o, Stderr: &e, Logger: quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("run: %v (stderr %s)", err, e.String())
+	}
+	if !strings.Contains(o.String(), "[md5-10m]") {
+		t.Fatalf("expected an md5-10m fallback marker:\n%s", o.String())
+	}
+	got := onlyMatch(t, root, "notes.*.bin")
+	raw, _ := os.ReadFile(got)
+	slot := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(got), "notes."), ".bin")
+	if sum := fmt.Sprintf("%x", md5.Sum(raw)); !strings.HasPrefix(sum, slot) {
+		t.Fatalf("slot %q not the md5 prefix of %s", slot, sum)
+	}
+}
+
+// TestMultipleTargetsAndSelect: several targets are merged and --select filters.
+func TestMultipleTargetsAndSelect(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+	writeImage(t, mkdirFile(t, a, "keep-me.png"))
+	writeImage(t, mkdirFile(t, a, "skip.png"))
+	writeImage(t, mkdirFile(t, b, "keep-too.png"))
+
+	var o, e bytes.Buffer
+	err := Run(context.Background(), Options{
+		Targets: []string{a, b}, Extensions: []string{".png"}, Method: MethodMD5,
+		Select: "name=keep*", NameLength: 6, AssumeYes: true, Recursive: true,
+		Stdout: &o, Stderr: &e, Logger: quietLogger(),
+	})
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, e.String())
+	}
+	if _, err := filepathGlob1(a, "keep-me.*.png"); err != nil {
+		t.Fatalf("keep-me should have been hashed: %v", err)
+	}
+	if _, err := filepathGlob1(b, "keep-too.*.png"); err != nil {
+		t.Fatalf("keep-too (2nd target) should have been hashed: %v", err)
+	}
+	if m, _ := filepath.Glob(filepath.Join(a, "skip.*.png")); len(m) != 0 {
+		t.Fatalf("skip.png should have been filtered out by --select")
+	}
+}
+
+func mkdirFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, name)
+}
+
+func filepathGlob1(dir, pat string) (string, error) {
+	m, _ := filepath.Glob(filepath.Join(dir, pat))
+	if len(m) != 1 {
+		return "", fmt.Errorf("want 1 match for %s, got %v", pat, m)
+	}
+	return m[0], nil
 }
 
 // TestMethodReplacesStaleNameHash: a different short hash already in the name is

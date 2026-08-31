@@ -35,7 +35,11 @@ const (
 	MethodSHA10M    Method = "sha-10m"
 )
 
-// DefaultMethod is used when no -m/--method is given.
+// MethodAuto is the behaviour when no -m/--method is given: try ffmpeg-10m per
+// file and fall back to md5-10m when the ffmpeg attempt errors.
+const MethodAuto Method = ""
+
+// DefaultMethod is the concrete method MethodAuto starts from.
 const DefaultMethod = MethodFFmpeg10M
 
 // byteCap10M bounds the "*-10m" methods.
@@ -47,10 +51,11 @@ var Methods = []Method{
 	MethodFFmpeg10M, MethodMD510M, MethodSHA10M,
 }
 
-// ParseMethod validates s (empty => DefaultMethod).
+// ParseMethod validates s. An empty string yields MethodAuto (try ffmpeg-10m,
+// fall back to md5-10m per file).
 func ParseMethod(s string) (Method, error) {
 	if strings.TrimSpace(s) == "" {
-		return DefaultMethod, nil
+		return MethodAuto, nil
 	}
 	m := Method(strings.ToLower(strings.TrimSpace(s)))
 	for _, k := range Methods {
@@ -63,6 +68,24 @@ func ParseMethod(s string) (Method, error) {
 		names[i] = string(k)
 	}
 	return "", fmt.Errorf("unknown method %q (want one of: %s)", s, strings.Join(names, ", "))
+}
+
+// resolve computes the digest for path. For MethodAuto it tries ffmpeg-10m and
+// falls back to md5-10m when that errors, returning the method that succeeded.
+func (m Method) resolve(path string, kind media.Kind) (hash string, used Method, err error) {
+	if m != MethodAuto {
+		h, e := m.digest(path, kind)
+		return h, m, e
+	}
+	h, ffErr := MethodFFmpeg10M.digest(path, kind)
+	if ffErr == nil {
+		return h, MethodFFmpeg10M, nil
+	}
+	if h2, e := MethodMD510M.digest(path, kind); e == nil {
+		return h2, MethodMD510M, nil
+	}
+	// Both failed — report the primary (ffmpeg) failure, the informative one.
+	return "", MethodAuto, ffErr
 }
 
 // WritesTag reports whether the method also stores the digest as mc.hash

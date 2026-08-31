@@ -56,7 +56,7 @@ func TestRunTagsRenamesAndIsIdempotent(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	opts := Options{
-		Target:      root,
+		Targets:     []string{root},
 		Extensions:  []string{".mp4", ".mkv"},
 		Method:      MethodFFmpeg,
 		MetadataKey: "mc.hash",
@@ -138,7 +138,7 @@ func TestMethodFFmpeg10MVideoRenameOnly(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	if err := Run(context.Background(), Options{
-		Target: root, Extensions: []string{".mp4"}, Method: MethodFFmpeg10M,
+		Targets: []string{root}, Extensions: []string{".mp4"}, Method: MethodFFmpeg10M,
 		NameLength: 6, AssumeYes: true,
 		Stdout: &out, Stderr: &errb, Logger: quietLogger(),
 	}); err != nil {
@@ -174,7 +174,7 @@ func TestRunAbortsWithoutConfirmation(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	opts := Options{
-		Target:      root,
+		Targets:     []string{root},
 		Extensions:  []string{".mp4"},
 		Method:      MethodFFmpeg,
 		MetadataKey: "mc.hash",

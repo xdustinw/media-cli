@@ -17,19 +17,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in; `scripts/build-ffmpeg.sh` builds any target (host or cross), fetching the
   pinned FFmpeg source when `../ref/ffmpeg` is absent. Audio/video use stream
   copy; a curated set of still-image decoders is enabled for image hashing.
-- **`mc hash [file|folder] [-m <method>] [-y] [-f] [-r]`**: fingerprints each
-  video (`.mp4 .mkv .mov .m4v .webm .avi`) and image (`.jpg .jpeg .jpe .jfif
-  .png .apng .gif .webp`) file and renames it to `<name>.<first 6 of hash>.<ext>`
-  (replacing a short hash already in the name). Given a folder, only its own
-  files are processed unless `-r` / `--recursive` is passed. The target defaults
-  to the current directory.
-  - `-m` / `--method` selects the fingerprint: `ffmpeg-10m` (default) md5s the
-    first ~10 MB of the video+audio stream; `ffmpeg` md5s the whole stream (or
-    decoded pixels for images) and is the only method that also writes the
-    `mc.hash` tag; `md5` / `sha` hash the raw file bytes; `md5-10m` / `sha-10m`
-    hash the first 10 MB of raw bytes. Only `ffmpeg` reads or writes metadata —
-    the rest just rename. The `*-10m` methods bound work on very large files
-    (new `ffmpeg.StreamHashLimit`; `mc_stream_hash` gained a `max_bytes` arg).
+- **`mc hash [file|folder ...] [-m <method>] [--select=<expr>] [-y] [-f] [--nr]`**:
+  fingerprints each video (`.mp4 .mkv .mov .m4v .webm .avi`) and image
+  (`.jpg .jpeg .jpe .jfif .png .apng .gif .webp`) file and renames it to
+  `<name>.<first 6 of hash>.<ext>` (replacing a short hash already in the name).
+  Takes one or more files/folders (default: the current directory); folders are
+  scanned **recursively unless `--nr` is passed** (the old `-r` opt-in flag is
+  gone — recursive is now the default).
+  - `-m` / `--method` selects the fingerprint. The default (no `-m`) tries
+    `ffmpeg-10m` and falls back to `md5-10m` for any file ffmpeg can't read.
+    `ffmpeg-10m` md5s the first ~10 MB of the video+audio stream; `ffmpeg` md5s
+    the whole stream (or decoded pixels for images) and is the only method that
+    also writes the `mc.hash` tag; `md5` / `sha` hash the raw file bytes;
+    `md5-10m` / `sha-10m` hash the first 10 MB of raw bytes. Only `ffmpeg` reads
+    or writes metadata — the rest just rename. The `*-10m` methods bound work on
+    very large files (new `ffmpeg.StreamHashLimit`; `mc_stream_hash` gained a
+    `max_bytes` arg).
+  - `--select` (fields `name/path/ext/size/modifiedAt/kind`) narrows the file
+    set; the matches are listed and confirmed before hashing, unless `-y`.
   - Video (`ffmpeg` method): hash of the encoded video+audio streams, ignoring container metadata
     (equivalent to `ffmpeg -map 0:v? -map 0:a? -c copy -f hash -hash md5 -`) —
     pure stream copy, never decoded. Parsers (`AVFMT_FLAG_NOPARSE`), the
@@ -87,20 +92,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs it. Previews `key: <current> -> <new>` per file and confirms unless
   `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
   `ffmpeg.WriteTags` / `imgmeta.WriteMany` / `imgmeta.ReadAll` added.
-- **`mc copy <source> <target> [-m <mode>] [-y]`** and **`mc move …`**: bring
-  every file from a source (file or folder) into a target folder, recursively,
-  each file landing at `<target>/<path relative to source>`. `move` removes a
-  source file once its target is written. Before writing, each source file's
+- **`mc copy <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--nr]`**
+  and **`mc move …`**: bring every file from one or more sources (files/folders)
+  into a target folder, each landing at `<target>/<path relative to that
+  source>`. Folders are scanned recursively unless `--nr`. `move` removes a
+  source once its target is written. Before writing, each source file's
   `.<6-hex>` short hash (from `mc hash`, name-based — no metadata read) is
   matched against the short hashes of files already anywhere under the target;
-  every match is a duplicate resolved as `overwrite` (copy source bytes over the
-  target file, keeping its path), `skip-duplicate` (leave both), or `rename`
-  (rename the target file to the source's name in place). `-m` / `--mode`
-  applies one choice to all duplicates; without it each is prompted. `-y` skips
-  the final confirm and defaults duplicates to `overwrite`. Non-duplicate path
-  collisions are skipped, never overwritten. The plan is shown as a TOON preview
-  first. New packages `internal/copycmd`, `media.CopyFile` / `media.MoveFile` /
-  `media.WalkFiles`.
+  `-m` / `--mode` says what to do with every match: `skip-duplicate` (default —
+  leave the target, keep the source; `move` does not delete a skipped source),
+  `overwrite` (copy source bytes over the matching target file), or `keep-both`
+  (bring the source in too, at `<target>/<rel>`). `--select` narrows the source
+  set with a confirmation before the hash compare. `-y` skips confirmations.
+  Non-duplicate path collisions are skipped, never overwritten. The plan is
+  shown as a TOON preview first. New package `internal/copycmd`;
+  `media.CopyFile` / `media.MoveFile` / `media.WalkFiles` / `media.DiscoverMany`
+  / `media.Facts`.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
   modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail
