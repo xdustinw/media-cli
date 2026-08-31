@@ -49,9 +49,10 @@ Only the 'ffmpeg' method reads or writes file metadata; the others just rename.
 --select filters the files (fields: name, path, ext, size, modifiedAt, kind);
 you are shown the matches and asked to confirm before hashing, unless -y.
 
-For the 'ffmpeg' method a file that already carries a valid 'mc.hash' tag is
-trusted and not re-hashed; pass -f/--force to re-compute and compare. Pass -y to
-skip confirmations.`,
+Files that already carry a valid 6-hex slot in their name are left untouched
+without being hashed (for the 'ffmpeg' method: a file with a valid 'mc.hash' tag
+is trusted). Pass -f/--force to re-hash them and re-check. Pass -y to skip
+confirmations.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed("yes") {

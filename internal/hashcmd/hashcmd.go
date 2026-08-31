@@ -156,6 +156,19 @@ func Run(ctx context.Context, o Options) error {
 			continue
 		}
 
+		// Rename-only methods: a name that already carries a valid short hash is
+		// left alone without being hashed at all, unless -f asks to re-check.
+		if !method.WritesTag() && !o.Force {
+			if slot := media.ShortHashInName(f, o.NameLength); slot != "" {
+				items = append(items, item{
+					path: f, rel: rel(f), newPath: f, newRel: rel(f),
+					kind: kind, usedMethod: method, existingTag: slot, act: actionSkip,
+				})
+				fmt.Fprintf(o.Stdout, "  = %s  (already hashed .%s)\n", rel(f), slot)
+				continue
+			}
+		}
+
 		// Fast path (ffmpeg method only): trust an existing, well-formed mc.hash
 		// tag and skip the hashing entirely, unless --force asks to re-verify.
 		var h string

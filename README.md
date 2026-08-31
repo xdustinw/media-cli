@@ -123,12 +123,15 @@ Preview (auto (ffmpeg-10m, md5-10m fallback), rename only):
   = trip/IMG_2.fbc6ec.jpg  fbc6ec44...
 ```
 
+**A file whose name already carries a valid 6-hex slot is left untouched and
+never hashed** (for `ffmpeg`, a file with a valid `mc.hash` tag is trusted the
+same way). Pass `-f` / `--force` to re-hash them and re-check — a stale slot is
+then replaced (`»` "replaces …"; `ffmpeg` rewrites the tag, `~` "stale mc.hash …
+replaced").
+
 For the `ffmpeg` method, after `[y/N]` (or `-y`) each pending file gets the tag
 `mc.hash=<hash>` written into it (pixels and streams left byte-for-byte
-untouched) and is renamed. **A file that already carries a valid `mc.hash` tag
-is trusted and not re-hashed**; pass `-f` / `--force` to re-compute and compare
-(a mismatch is flagged `~` "stale mc.hash … replaced" and rewritten). `-f` has
-no effect on the rename-only methods, which always re-read the file.
+untouched) and is renamed.
 
 ### `mc list`
 

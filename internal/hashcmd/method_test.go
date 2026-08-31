@@ -31,16 +31,20 @@ func TestParseMethod(t *testing.T) {
 
 func runMethod(t *testing.T, root string, method Method) (stdout string) {
 	t.Helper()
-	var o, e bytes.Buffer
-	err := Run(context.Background(), Options{
+	return runMethodOpts(t, Options{
 		Targets: []string{root}, Extensions: []string{".png"}, Method: method,
 		NameLength: 6, AssumeYes: true,
-		Stdout: &o, Stderr: &e, Logger: quietLogger(),
 	})
-	if err != nil {
-		t.Fatalf("run %s: %v (stderr %s)", method, err, e.String())
+}
+
+func runMethodOpts(t *testing.T, o Options) string {
+	t.Helper()
+	var out, e bytes.Buffer
+	o.Stdout, o.Stderr, o.Logger = &out, &e, quietLogger()
+	if err := Run(context.Background(), o); err != nil {
+		t.Fatalf("run %s: %v (stderr %s)", o.Method, err, e.String())
 	}
-	return o.String()
+	return out.String()
 }
 
 // TestMethodRenameOnly: md5 renames by content hash but writes no mc.hash tag.
@@ -172,18 +176,38 @@ func filepathGlob1(dir, pat string) (string, error) {
 	return m[0], nil
 }
 
-// TestMethodReplacesStaleNameHash: a different short hash already in the name is
-// replaced, keeping the stem.
-func TestMethodReplacesStaleNameHash(t *testing.T) {
+// TestMethodSkipsNamedFileWithoutForce: a name that already carries a valid
+// 6-hex slot is left completely alone unless -f is given.
+func TestMethodSkipsNamedFileWithoutForce(t *testing.T) {
+	root := t.TempDir()
+	writeImage(t, filepath.Join(root, "pic.aaaaaa.png")) // stale slot, wrong hash
+
+	out := runMethod(t, root, MethodMD5)
+	if !strings.Contains(out, "already hashed .aaaaaa") || !strings.Contains(out, "Nothing to do") {
+		t.Fatalf("a named file must be skipped without hashing:\n%s", out)
+	}
+	if !exists(filepath.Join(root, "pic.aaaaaa.png")) {
+		t.Fatal("the file must not be renamed")
+	}
+}
+
+// TestMethodForceReplacesStaleNameHash: with -f the stale slot is re-checked and
+// replaced.
+func TestMethodForceReplacesStaleNameHash(t *testing.T) {
 	root := t.TempDir()
 	writeImage(t, filepath.Join(root, "pic.aaaaaa.png"))
 
-	out := runMethod(t, root, MethodMD5)
+	out := runMethodOpts(t, Options{
+		Targets: []string{root}, Extensions: []string{".png"}, Method: MethodMD5,
+		NameLength: 6, AssumeYes: true, Force: true,
+	})
 	if !strings.Contains(out, "replaces .aaaaaa") {
-		t.Fatalf("expected a 'replaces .aaaaaa' note:\n%s", out)
+		t.Fatalf("expected a 'replaces .aaaaaa' note under -f:\n%s", out)
 	}
 	got := onlyMatch(t, root, "pic.*.png")
 	if strings.Contains(filepath.Base(got), "aaaaaa") {
 		t.Fatalf("stale hash slot not replaced: %s", filepath.Base(got))
 	}
 }
+
+func exists(p string) bool { _, err := os.Stat(p); return err == nil }

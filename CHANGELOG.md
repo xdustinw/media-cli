@@ -53,11 +53,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Tag writes (`ffmpeg` method) never alter pixels or streams: video is remuxed with stream copy;
     images get a native text record (PNG `tEXt`, JPEG `COM`, GIF comment, WebP
     `mcTG` chunk) added via `internal/imgmeta`.
-  - For the `ffmpeg` method a file that already has a valid `mc.hash` tag is
-    trusted and not re-hashed — the stored value is used directly, making re-runs
-    on large, already-processed folders near-instant. `-f` / `--force`
-    re-computes and compares, flagging any mismatch; it has no effect on the
-    rename-only methods, which always re-read the file.
+  - A file whose name already carries a valid 6-hex slot is left untouched and
+    never hashed (for the `ffmpeg` method, a valid `mc.hash` tag is trusted the
+    same way) — re-runs on large, already-processed folders are near-instant.
+    `-f` / `--force` re-hashes them and re-checks, replacing a stale slot / tag.
   - The per-file preview (hash + planned name, `+`/`»`/`~`/`=` glyph) is printed
     as each file is processed, so progress shows on large folders.
 - **`mc list [folder] [flags]`**: folder listing (folder defaults to the current
