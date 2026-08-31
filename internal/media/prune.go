@@ -18,7 +18,7 @@ import (
 func PruneEmptyDirs(roots ...string) []string {
 	cwd, _ := os.Getwd()
 	if cwd != "" {
-		cwd, _ = filepath.Abs(cwd)
+		cwd = resolve(cwd)
 	}
 
 	var removed []string
@@ -43,10 +43,7 @@ func PruneEmptyDirs(roots ...string) []string {
 
 		for i := len(dirs) - 1; i >= 0; i-- {
 			dir := dirs[i]
-			abs, err := filepath.Abs(dir)
-			if err != nil {
-				continue
-			}
+			abs := resolve(dir)
 			if abs == filepath.Dir(abs) || abs == cwd { // filesystem root / cwd
 				continue
 			}
@@ -60,4 +57,19 @@ func PruneEmptyDirs(roots ...string) []string {
 		}
 	}
 	return removed
+}
+
+// resolve returns path as an absolute, symlink-resolved path so comparisons
+// hold on platforms where the temp dir or cwd is reached through a symlink
+// (e.g. macOS /var -> /private/var). It falls back to the plain absolute path
+// when the target cannot be resolved.
+func resolve(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		return r
+	}
+	return abs
 }
