@@ -230,8 +230,8 @@ mc set 'artist="Doe, Jane"' ~/Photos --select='artist=old-name'   # quote to kee
 ### `mc copy` / `mc move`
 
 ```
-mc copy <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--nr]
-mc move <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--nr]
+mc copy <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [-v] [--nr]
+mc move <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [--delete-source] [-y] [-v] [--nr]
 ```
 
 Bring every file from the source(s) — files and/or folders — into `<target>`,
@@ -266,8 +266,13 @@ the target already holds a content duplicate and the mode is `skip-duplicate` �
 so the source folder ends up empty regardless. It respects `--select`.
 
 **`--select`** filters the source files (`name`, `path`, `ext`, `size`,
-`modifiedAt`, `kind`); you're shown the matches and asked to confirm before the
-hash compare, unless `-y`. `-y` also skips the final confirmation.
+`modifiedAt`, `kind`). `-y` skips the confirmation.
+
+**Output.** The preview lists only the files that will actually be copied/moved;
+duplicates already at the target are collapsed to a count (and repeated in the
+summary line). Pass `-v` to also list the `--select` matches and the full
+duplicates table. With `--delete-source` the duplicates are always listed, so
+you can see which sources will be removed.
 
 **Unhashed files.** When files in the sources or the target have no
 `.<6-hex>` slot, `mc copy` / `mc move` offers to hash them first (`mc hash`,
@@ -279,7 +284,7 @@ anything happens.
 ### `mc dedupe`
 
 ```
-mc dedupe [folder ...] [-m <method>] [--select=<expr>] [-y] [--nr]
+mc dedupe [folder ...] [-k <keep>] [--select=<expr>] [-y] [--nr]
 ```
 
 Groups files by the `.<6-hex>` short hash in their name (from
@@ -287,17 +292,19 @@ Groups files by the `.<6-hex>` short hash in their name (from
 directory), then **deletes all but one copy** of each set. Folders are scanned
 recursively unless `--nr`.
 
-| `-m` / `--method` | which copy is kept |
+| `-k` / `--keep` | which copy is kept |
 | --- | --- |
 | `i` / `interactive` *(default)* | you're shown each set and pick which to keep (`1`-`n`), or `s` to skip that set |
 | `l` / `longer-name` | the file with the longest name |
 | `n` / `newer` | the most recently modified |
 | `o` / `older` | the oldest |
+| `f<n>` / `folder<n>` | protect the **n-th folder** given on the command line: its copies are never deleted and a duplicate in any other folder is. A set with no copy in that folder is left alone. |
 
 ```bash
 mc dedupe ~/Photos ~/Backup/Photos            # review each set by hand
-mc dedupe ~/Photos ~/Backup -m newer -y       # keep the newest, no prompts
-mc dedupe ~/Photos --select='name=IMG_*' -m longer-name
+mc dedupe ~/Photos ~/Backup -k newer -y       # keep the newest, no prompts
+mc dedupe ~/Photos --select='name=IMG_*' -k longer-name
+mc dedupe ~/Library ~/Phone ~/Card -k f1 -y   # keep everything in ~/Library, prune the rest
 ```
 
 Files without a `.<6-hex>` slot are offered to `mc hash` first (or, with `-y`,

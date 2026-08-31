@@ -103,8 +103,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   needs it. Previews `key: <current> -> <new>` per file and confirms unless
   `-y`. Parser in `internal/tag`, workflow in `internal/setcmd`;
   `ffmpeg.WriteTags` / `imgmeta.WriteMany` / `imgmeta.ReadAll` added.
-- **`mc copy <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--nr]`**
-  and **`mc move …`**: bring every file from one or more sources (files/folders)
+- **`mc copy <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [-v] [--nr]`**
+  and **`mc move … [--delete-source]`**: bring every file from one or more sources (files/folders)
   into a target folder, each landing at `<target>/<path relative to that
   source>`. Folders are scanned recursively unless `--nr`. `move` removes a
   source once its target is written. Before writing, each source file's
@@ -114,7 +114,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   leave the target, keep the source; `move` does not delete a skipped source),
   `overwrite` (copy source bytes over the matching target file), or `keep-both`
   (bring the source in too, at `<target>/<rel>`). `--select` narrows the source
-  set with a confirmation before the hash compare. When source/target files
+  set. When source/target files
   have no short hash, `mc copy`/`mc move` offers to hash them first (`-y` does
   it automatically); declined, the comparison falls back to relative path. `-y`
   skips confirmations. Non-duplicate path collisions are skipped, never
@@ -134,6 +134,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     (at any depth, including a folder named on the command line). The current
     working directory and a filesystem root are never removed. New
     `media.PruneEmptyDirs`.
+  - `mc copy` / `mc move` output is quieter: the preview lists only the files
+    that will actually be copied/moved. The `--select` match list and the
+    separate "these N file(s)?" confirmation are gone (the one "Proceed?" prompt
+    remains), and duplicates already at the target are collapsed to a count in
+    the preview and summary. `-v` restores the `--select` list and the full
+    duplicates table; `--delete-source` always lists the duplicates so the
+    to-be-removed sources are visible.
 - **`mc list-missing <src-folder> <target-folder> [<target-folder> …]
   [--select=<expr>] [-y] [--nr]`** (alias `find-missing`): walks the source
   folder and lists every file whose `.<6-hex>` short hash (from `mc hash`) is on
@@ -143,15 +150,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hashes them); declined, the comparison falls back to the base file name.
   Read-only aside from an accepted hash pass; results print as a TOON table. New
   package `internal/listmissingcmd`.
-- **`mc dedupe [folder ...] [-m <method>] [--select=<expr>] [-y] [--nr]`**:
+- **`mc dedupe [folder ...] [-k <keep>] [--select=<expr>] [-y] [--nr]`**:
   groups files by the `.<6-hex>` short hash in their name (from `mc hash`, no
   metadata read) across the folders (default: the current directory) and deletes
-  all but one copy of each set. Folders are scanned recursively unless `--nr`. `-m` / `--method` chooses the
-  keeper: `interactive` (default — pick per set, or skip it), `longer-name`,
-  `newer`, or `older`. `--select` filters the files. Files without a short hash
-  are offered to `mc hash` first (`-y` hashes them); declined, they are grouped
-  by file name. The deletions are shown as a TOON preview and confirmed unless
-  `-y`. New package `internal/dedupecmd`.
+  all but one copy of each set. Folders are scanned recursively unless `--nr`.
+  `-k` / `--keep` (renamed from `-m` / `--method`) chooses the keeper:
+  `interactive` (default — pick per set, or skip it), `longer-name`, `newer`,
+  `older`, or `f<n>` / `folder<n>` — protect the n-th folder named on the
+  command line: its copies are never deleted and a duplicate in any other folder
+  is (a set with no copy in that folder is left alone). `--select` filters the
+  files. Files without a short hash are offered to `mc hash` first (`-y` hashes
+  them); declined, they are grouped by file name. The deletions are shown as a
+  TOON preview and confirmed unless `-y`. New package `internal/dedupecmd`.
 - **`mc delete [folder ...] --select=<expr> [-y] [--nr]`**: deletes the files
   under the folders (default: the current directory) that match `--select` —
   which is required. Folders are scanned recursively unless `--nr`. The matched

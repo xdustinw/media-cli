@@ -85,6 +85,7 @@ func runCopyMove(move bool) func(*cobra.Command, []string) error {
 			Mode:         mode,
 			Select:       sel,
 			Recursive:    !nr,
+			Verbose:      vip.GetBool(config.KeyVerbose),
 			DeleteSource: move && flagMoveDeleteSrc,
 			AssumeYes:    vip.GetBool(config.KeyAssumeYes),
 			Stdout:       out,

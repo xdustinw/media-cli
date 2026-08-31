@@ -59,6 +59,7 @@ type Options struct {
 	Mode      Mode // "" => ModeSkipDuplicate
 	Select    string
 	Recursive bool // descend into source subfolders
+	Verbose   bool // list --select matches and skipped duplicates in the preview
 	// DeleteSource (move only) removes every matching source file even when a
 	// content duplicate already sits under the target and the mode is
 	// skip-duplicate. Modes overwrite / keep-both already consume the source.
@@ -79,13 +80,6 @@ func (o Options) verb() string {
 		return "move"
 	}
 	return "copy"
-}
-
-func (o Options) verbTitle() string {
-	if o.Move {
-		return "Move"
-	}
-	return "Copy"
 }
 
 type srcFile struct{ path, rel string }
@@ -145,15 +139,12 @@ func Run(ctx context.Context, o Options) error {
 		return nil
 	}
 
-	// With --select, confirm the file list before hashing/comparing.
-	if o.Select != "" && !o.AssumeYes {
+	// With --select, list the matches only when asked (-v). The final "Proceed?"
+	// prompt is the one confirmation; there is no separate one for the selection.
+	if o.Select != "" && o.Verbose {
 		fmt.Fprintf(o.Stdout, "%d file(s) match %q:\n", selected, o.Select)
 		for _, sf := range srcs {
 			fmt.Fprintf(o.Stdout, "  %s\n", sf.rel)
-		}
-		if !confirmed(o, fmt.Sprintf("%s these %d file(s)? [y/N] ", o.verbTitle(), selected)) {
-			fmt.Fprintln(o.Stdout, "Aborted; nothing changed.")
-			return nil
 		}
 	}
 
@@ -175,7 +166,6 @@ func Run(ctx context.Context, o Options) error {
 			if srcs, targetFiles, selected, err = gather(); err != nil {
 				return err
 			}
-			_ = selected
 		default:
 			byPath = true
 			fmt.Fprintln(o.Stderr, "  comparing by relative path (unhashed files not fingerprinted)")
@@ -232,8 +222,16 @@ func Run(ctx context.Context, o Options) error {
 		plains = append(plains, p)
 	}
 
-	if len(plains) == 0 && len(dups) == 0 {
-		fmt.Fprintln(o.Stdout, "Nothing to do.")
+	// Whether anything will actually be written: real files always count;
+	// duplicates count only when the mode acts on them or --delete-source will
+	// remove their sources.
+	dupsAreWork := o.Mode != ModeSkipDuplicate || (o.Move && o.DeleteSource)
+	if len(plains) == 0 && !(len(dups) > 0 && dupsAreWork) {
+		if len(dups) > 0 {
+			fmt.Fprintf(o.Stdout, "Nothing to %s — %d duplicate(s) already at the target.\n", o.verb(), len(dups))
+		} else {
+			fmt.Fprintln(o.Stdout, "Nothing to do.")
+		}
 		return conflictErr(skipConflicts)
 	}
 
@@ -364,12 +362,21 @@ func preview(o Options, byPath bool, plains, dups []plan) {
 		}
 		doc.AddTable(t)
 	}
+	// The duplicates table is noise in the common case (skip-duplicate): list it
+	// only with -v, when the mode actually touches those files, or when
+	// --delete-source needs to show which sources it will remove. Otherwise just
+	// a count — the summary line repeats it.
 	if len(dups) > 0 {
-		t := toon.Table{Name: "duplicates", Columns: []string{"source", "matches", "action"}}
-		for _, p := range dups {
-			t.Rows = append(t.Rows, []string{p.rel, p.tgtRel, dupAction(o, p)})
+		listDups := o.Verbose || o.Mode != ModeSkipDuplicate || (o.Move && o.DeleteSource)
+		if listDups {
+			t := toon.Table{Name: "duplicates", Columns: []string{"source", "matches", "action"}}
+			for _, p := range dups {
+				t.Rows = append(t.Rows, []string{p.rel, p.tgtRel, dupAction(o, p)})
+			}
+			doc.AddTable(t)
+		} else {
+			doc.AddField("duplicates", fmt.Sprintf("%d already at the target, skipped (use -v to list)", len(dups)))
 		}
-		doc.AddTable(t)
 	}
 	fmt.Fprint(o.Stdout, doc.String())
 }

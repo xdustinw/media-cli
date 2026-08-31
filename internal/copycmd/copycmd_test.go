@@ -89,7 +89,7 @@ func TestSkipDuplicateIsDefaultAndKeepsSourceOnMove(t *testing.T) {
 	write(t, filepath.Join(src, "x.ffffff.png"), "SRC")
 	write(t, filepath.Join(dst, "have", "y.ffffff.png"), "TGT")
 
-	_, errOut, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true}) // no Mode => skip
+	out, _, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true}) // no Mode => skip
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,8 +99,54 @@ func TestSkipDuplicateIsDefaultAndKeepsSourceOnMove(t *testing.T) {
 	if !exists(filepath.Join(src, "x.ffffff.png")) {
 		t.Fatal("move + skip-duplicate must leave the source in place")
 	}
+	if !strings.Contains(out, "1 duplicate(s) already at the target") {
+		t.Fatalf("should report the skipped duplicate:\n%s", out)
+	}
+}
+
+// In skip-duplicate mode a mix of new + duplicate sources previews only the new
+// files and counts the rest.
+func TestSkippedDuplicatesAreCountedNotListed(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "fresh.aaaaaa.jpg"), "NEW")
+	write(t, filepath.Join(src, "dup.bbbbbb.jpg"), "DUP")
+	write(t, filepath.Join(dst, "have", "other.bbbbbb.jpg"), "DUP")
+
+	out, errOut, err := run(t, Options{Sources: []string{src}, Target: dst})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "fresh.aaaaaa.jpg") {
+		t.Fatalf("the new file should be in the preview:\n%s", out)
+	}
+	if strings.Contains(out, "dup.bbbbbb.jpg") {
+		t.Fatalf("the duplicate must not be listed without -v:\n%s", out)
+	}
+	if !strings.Contains(out, "1 already at the target") {
+		t.Fatalf("the duplicate should be counted in the preview:\n%s", out)
+	}
 	if !strings.Contains(errOut, "1 duplicate(s) skipped") {
-		t.Fatalf("summary should note the skip:\n%s", errOut)
+		t.Fatalf("the summary should note the skip:\n%s", errOut)
+	}
+}
+
+// -v restores the full duplicates table.
+func TestVerboseListsDuplicates(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "dup.bbbbbb.jpg"), "DUP")
+	write(t, filepath.Join(src, "fresh.aaaaaa.jpg"), "NEW")
+	write(t, filepath.Join(dst, "other.bbbbbb.jpg"), "DUP")
+
+	out, _, err := run(t, Options{Sources: []string{src}, Target: dst, Verbose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "duplicates") || !strings.Contains(out, "dup.bbbbbb.jpg") {
+		t.Fatalf("-v should list the duplicates table:\n%s", out)
 	}
 }
 
@@ -140,7 +186,7 @@ func TestKeepBothBringsDuplicateInToo(t *testing.T) {
 	}
 }
 
-func TestSelectFiltersAndConfirms(t *testing.T) {
+func TestSelectFiltersWithoutASeparateConfirm(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")
 	dst := filepath.Join(root, "dst")
@@ -155,14 +201,37 @@ func TestSelectFiltersAndConfirms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(asked, "Copy these 1 file(s)?") {
-		t.Fatalf("expected a pre-scan confirmation for --select, got prompts:\n%s", asked)
+	if strings.Contains(asked, "these") { // no "Copy these N file(s)?" prompt
+		t.Fatalf("there should be no separate --select confirmation:\n%s", asked)
+	}
+	if !strings.Contains(asked, "Proceed with copy?") {
+		t.Fatalf("the one Proceed prompt should still be asked:\n%s", asked)
+	}
+	if strings.Contains(out, "match \"name=3*\"") { // matches not listed without -v
+		t.Fatalf("the --select match list should not show without -v:\n%s", out)
 	}
 	if !exists(filepath.Join(dst, "3-keep.aaaaaa.jpg")) {
 		t.Fatal("selected file not copied")
 	}
 	if exists(filepath.Join(dst, "9-drop.bbbbbb.jpg")) {
 		t.Fatalf("non-matching file was copied:\n%s", out)
+	}
+}
+
+func TestSelectListsMatchesUnderVerbose(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "3-keep.aaaaaa.jpg"), "K")
+
+	out, _, err := run(t, Options{
+		Sources: []string{src}, Target: dst, Select: "name=3*", Verbose: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "3-keep.aaaaaa.jpg") || !strings.Contains(out, "match") {
+		t.Fatalf("-v should list the --select matches:\n%s", out)
 	}
 }
 
