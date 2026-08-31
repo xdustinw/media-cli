@@ -25,12 +25,15 @@ wherever it currently sits on your PATH.
 
 Only stable releases are considered by default. A newer preview (pre-release) is
 always reported: when there is no stable update it is offered instead, and when
-a stable update is offered the preview is noted so you can re-run with
---preview. Pass --preview to update straight to the newest preview build. Pass
--y to skip the confirmation prompt (with -y a preview is only installed when
-combined with --preview).
+a stable update is offered the preview is noted so you can re-run with --preview.
 
-If the installed version is already current, nothing is downloaded.`,
+--preview targets the newest preview build on GitHub and offers it **regardless
+of the installed version** — so it can also be used to switch a stable install
+onto the preview channel, or to re-install the current preview. With -y that
+install happens without a prompt.
+
+If the installed version is already current (and --preview was not given),
+nothing is downloaded.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		ctx := cmd.Context()
@@ -52,18 +55,6 @@ If the installed version is already current, nothing is downloaded.`,
 		newer := func(r *selfupdate.Release) bool {
 			return r != nil && selfupdate.IsNewer(norm(r.TagName), norm(installed))
 		}
-		newest := func(a, b *selfupdate.Release) *selfupdate.Release {
-			switch {
-			case a == nil:
-				return b
-			case b == nil:
-				return a
-			case selfupdate.Compare(norm(a.TagName), norm(b.TagName)) >= 0:
-				return a
-			default:
-				return b
-			}
-		}
 
 		fmt.Fprintf(out, "  %-11s %s\n", "installed:", installed)
 		fmt.Fprintf(out, "  %-11s %s\n", "stable:", tagOrNone(stable))
@@ -74,9 +65,15 @@ If the installed version is already current, nothing is downloaded.`,
 		skipPrompt := flagUpdateYes || vip.GetBool(config.KeyAssumeYes)
 
 		var target *selfupdate.Release
+		forcePreview := false
 		switch {
 		case flagUpdatePreview:
-			target = newest(stable, preview)
+			if preview == nil {
+				fmt.Fprintln(out, "\nNo preview (pre-release) release is published.")
+				return nil
+			}
+			// --preview offers the newest preview no matter the installed version.
+			target, forcePreview = preview, true
 		case newer(stable):
 			target = stable
 		case newer(preview):
@@ -89,7 +86,7 @@ If the installed version is already current, nothing is downloaded.`,
 			target = preview
 		}
 
-		if !newer(target) {
+		if target == nil || (!forcePreview && !newer(target)) {
 			fmt.Fprintln(out, "\nAlready up to date.")
 			return nil
 		}
@@ -115,10 +112,16 @@ If the installed version is already current, nothing is downloaded.`,
 			doc.AddField("channel", "preview")
 		}
 		doc.AddField("download", asset.Name)
-		fmt.Fprintln(out, "\nA newer version is available:")
+
+		header, prompt := "\nA newer version is available:", fmt.Sprintf("\nUpdate to %s? [y/N] ", target.TagName)
+		if forcePreview && !newer(target) {
+			header = "\nPreview build:"
+			prompt = fmt.Sprintf("\nInstall preview %s (installed: %s)? [y/N] ", target.TagName, installed)
+		}
+		fmt.Fprintln(out, header)
 		fmt.Fprint(out, doc.String())
 
-		if !skipPrompt && !confirm(cmd, fmt.Sprintf("\nUpdate to %s? [y/N] ", target.TagName)) {
+		if !skipPrompt && !confirm(cmd, prompt) {
 			fmt.Fprintln(out, "Aborted; binary unchanged.")
 			return nil
 		}

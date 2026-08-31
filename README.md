@@ -331,8 +331,11 @@ Only **stable** releases are used by default. If a newer **preview**
 (pre-release) is also published, `mc update` reports it: when there is no stable
 update to offer, it prompts to install the preview instead; when a stable update
 *is* offered, the preview is noted so you can re-run with `--preview`.
-`--preview` goes straight to the newest preview build. With `-y`, a preview is
-installed only when `--preview` is also given.
+
+**`--preview`** targets the newest preview build on GitHub and offers it
+**regardless of the installed version** — use it to move a stable install onto
+the preview channel, or to re-install the current preview. With `-y` that
+install runs without a prompt.
 
 ### `mc version`
 

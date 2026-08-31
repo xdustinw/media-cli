@@ -148,8 +148,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Considers stable releases by default. A newer preview (pre-release) is always
     reported; when there is no stable update it is offered interactively, and
     when a stable update is offered the preview is noted for a `--preview`
-    re-run. `--preview` targets the newest preview directly; with `-y` a preview
-    is only taken alongside `--preview`. Backed by `selfupdate.Releases` /
+    re-run. `--preview` targets the newest preview on GitHub and offers it
+    **regardless of the installed version** (so it can switch a stable install
+    onto the preview channel, or re-install the current preview); with `-y` that
+    install runs without a prompt. Backed by `selfupdate.Releases` /
     `selfupdate.LatestReleases` (all releases listed and ranked locally),
     replacing the single `releases/latest` lookup.
 - **License compliance**: FFmpeg is LGPL-2.1-or-later and statically linked, so
