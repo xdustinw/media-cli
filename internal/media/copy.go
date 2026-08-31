@@ -1,12 +1,11 @@
 package media
 
 import (
-	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
-	"syscall"
 	"time"
 )
 
@@ -48,22 +47,37 @@ func CopyFile(src, dst string) error {
 	return nil
 }
 
-// MoveFile renames src to dst (creating dst's parent directories), falling back
-// to CopyFile followed by removing src when the two are on different
-// filesystems (os.Rename returns EXDEV).
+// MoveFile renames src to dst, creating dst's parent directories.
+//
+// When src and dst sit on different volumes os.Rename fails — with EXDEV on
+// Unix, ERROR_NOT_SAME_DEVICE on Windows — and MoveFile copies the bytes across
+// instead, removing src only after the copied file is confirmed to be the same
+// size. Any other rename error is returned unchanged and src is left in place,
+// so a failed move never destroys the original.
 func MoveFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	err := os.Rename(src, dst)
-	if err == nil {
+	if err := os.Rename(src, dst); err == nil {
 		return nil
-	}
-	if !errors.Is(err, syscall.EXDEV) {
+	} else if !isCrossDevice(err) {
 		return err
 	}
-	if cerr := CopyFile(src, dst); cerr != nil {
-		return cerr
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := CopyFile(src, dst); err != nil {
+		return err
+	}
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		return fmt.Errorf("verifying copied file (source kept at %s): %w", src, err)
+	}
+	if dstInfo.Size() != srcInfo.Size() {
+		return fmt.Errorf("copied file is %d bytes, expected %d; source kept at %s",
+			dstInfo.Size(), srcInfo.Size(), src)
 	}
 	return os.Remove(src)
 }

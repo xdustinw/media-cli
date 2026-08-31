@@ -124,6 +124,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `mc move` gained `--delete-source`: deletes every matching source file even
     when the target already holds a content duplicate under `skip-duplicate`, so
     the source folder is drained regardless. Honours `--select`.
+  - `mc move` across drives: `media.MoveFile` now also recognises Windows'
+    `ERROR_NOT_SAME_DEVICE` (not just Unix `EXDEV`) as the signal to copy the
+    bytes across instead of renaming, and removes the source only after the
+    copied file is confirmed byte-count-identical. Any other rename failure is
+    returned unchanged with the source left in place, so a failed move can never
+    destroy the original.
 - **`mc list-missing <src-folder> <target-folder> [<target-folder> …]
   [--select=<expr>] [-y] [--nr]`** (alias `find-missing`): walks the source
   folder and lists every file whose `.<6-hex>` short hash (from `mc hash`) is on

@@ -411,6 +411,10 @@ func apply(o Options, p plan) (int64, error) {
 			return 0, err
 		}
 		if o.Move {
+			if got := fileSize(p.tgt); got != size {
+				return 0, fmt.Errorf("overwrote %s but it is %d bytes, expected %d; source kept",
+					filepath.Base(p.tgt), got, size)
+			}
 			return size, removeFile(p.src)
 		}
 		return size, nil

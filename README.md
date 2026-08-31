@@ -237,7 +237,9 @@ mc move <source> [<source> ...] <target> [-m <mode>] [--select=<expr>] [-y] [--n
 Bring every file from the source(s) — files and/or folders — into `<target>`,
 each landing at `<target>/<path relative to that source>`. Folders are scanned
 recursively unless `--nr` is passed. `move` removes a source once its target is
-written; `copy` leaves it.
+written; `copy` leaves it. A `move` across drives copies the bytes over and
+deletes the source only after verifying the copy — a failed move never loses the
+original.
 
 Before writing anything, each source file's `.<6-hex>` short hash (from
 [`mc hash`](#mc-hash)) is looked up among the short hashes of the files
