@@ -61,6 +61,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     never hashed (for the `ffmpeg` method, a valid `mc.hash` tag is trusted the
     same way) — re-runs on large, already-processed folders are near-instant.
     `-f` / `--force` re-hashes them and re-checks, replacing a stale slot / tag.
+  - When the renamed-to name already exists in the same folder, `mc hash` asks
+    per file whether to `[o]verwrite` it, `[s]kip` (keep both), or `[d]elete`
+    the incoming un-hashed file (default); `-y` always deletes it.
   - The per-file preview (hash + planned name, `+`/`»`/`~`/`=` glyph) is printed
     as each file is processed, so progress shows on large folders.
 - **`mc list [folder] [flags]`**: folder listing (folder defaults to the current

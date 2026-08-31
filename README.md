@@ -135,6 +135,12 @@ For the `ffmpeg` method, after `[y/N]` (or `-y`) each pending file gets the tag
 `mc.hash=<hash>` written into it (pixels and streams left byte-for-byte
 untouched) and is renamed.
 
+**Name already taken.** If the renamed-to name already exists in the same folder
+(a copy that was hashed earlier), you're asked per file: `[o]verwrite` it,
+`[s]kip` (keep both, leave this one un-renamed), or `[d]elete` the incoming
+un-hashed file (**default** — the hashed copy is already there). With `-y` the
+incoming file is always deleted.
+
 ### `mc list`
 
 ```

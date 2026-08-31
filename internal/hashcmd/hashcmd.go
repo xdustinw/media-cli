@@ -44,7 +44,10 @@ type Options struct {
 	Stdout  io.Writer
 	Stderr  io.Writer
 	Confirm func(prompt string) (bool, error) // nil => treated as "no"
-	Logger  *slog.Logger
+	// OnCollision resolves the case where the renamed-to path already exists in
+	// the same folder. nil (or -y) => CollisionDelete.
+	OnCollision func(incoming, existing string) (CollisionAction, error)
+	Logger      *slog.Logger
 }
 
 type action int
@@ -53,6 +56,16 @@ const (
 	actionSkip  action = iota // already tagged and named
 	actionTag                 // write tag + rename
 	actionRetag               // rewrite tag, name already correct
+)
+
+// CollisionAction is how a rename that would overwrite an existing hash-named
+// file in the same folder is resolved.
+type CollisionAction int
+
+const (
+	CollisionDelete    CollisionAction = iota // delete the incoming un-hashed file (default)
+	CollisionOverwrite                        // replace the existing file with the newly-hashed one
+	CollisionSkip                             // keep both — leave the incoming file un-renamed
 )
 
 type item struct {
@@ -271,7 +284,34 @@ func Run(ctx context.Context, o Options) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := apply(o.MetadataKey, method, it); err != nil {
+
+		overwrite := false
+		if it.newPath != it.path {
+			if _, serr := os.Stat(it.newPath); serr == nil {
+				act, cerr := resolveCollision(o, it)
+				if cerr != nil {
+					return cerr
+				}
+				switch act {
+				case CollisionSkip:
+					fmt.Fprintf(o.Stdout, "  = %s  (kept — %s already exists)\n", it.rel, it.newRel)
+					continue
+				case CollisionOverwrite:
+					overwrite = true
+				default: // CollisionDelete
+					if rmErr := os.Remove(it.path); rmErr != nil {
+						applyErrs++
+						fmt.Fprintf(o.Stderr, "  ! %s: %v\n", it.rel, rmErr)
+						continue
+					}
+					fmt.Fprintf(o.Stdout, "  ✓ %s  ->  deleted (%s already hashed)\n", it.rel, it.newRel)
+					log.Info("deduped", "removed", it.path, "kept", it.newPath)
+					continue
+				}
+			}
+		}
+
+		if err := apply(o.MetadataKey, method, it, overwrite); err != nil {
 			applyErrs++
 			fmt.Fprintf(o.Stderr, "  ! %s: %v\n", it.rel, err)
 			continue
@@ -428,13 +468,23 @@ func looksLikeHash(s string) bool {
 	return true
 }
 
+// resolveCollision decides what to do when it.newPath already exists. -y or a
+// nil callback => CollisionDelete.
+func resolveCollision(o Options, it item) (CollisionAction, error) {
+	if o.AssumeYes || o.OnCollision == nil {
+		return CollisionDelete, nil
+	}
+	return o.OnCollision(it.rel, it.newRel)
+}
+
 // apply performs the planned change for one item. Rename-only methods just move
 // the file; the ffmpeg method writes the tag into a sibling temp file first.
-func apply(key string, m Method, it item) error {
+// overwrite lets the move replace an existing file at it.newPath.
+func apply(key string, m Method, it item, overwrite bool) error {
 	// Rename-only methods (and the ffmpeg fast path where the tag is already
 	// correct and only the name is stale): a plain rename, no metadata write.
 	if !m.WritesTag() || (it.existingTag == it.hash && it.newPath != it.path) {
-		return media.SwapInPlace(it.path, it.newPath, false)
+		return media.SwapInPlace(it.path, it.newPath, overwrite)
 	}
 
 	tmp := filepath.Join(filepath.Dir(it.path),
@@ -446,8 +496,7 @@ func apply(key string, m Method, it item) error {
 		return err
 	}
 
-	overwrite := it.newPath == it.path
-	if err := media.SwapInPlace(tmp, it.newPath, overwrite); err != nil {
+	if err := media.SwapInPlace(tmp, it.newPath, overwrite || it.newPath == it.path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

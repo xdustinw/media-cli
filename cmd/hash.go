@@ -70,6 +70,15 @@ confirmations.`,
 		}
 
 		in := bufio.NewReader(cmd.InOrStdin())
+		out := cmd.OutOrStdout()
+		readLine := func(prompt string) string {
+			fmt.Fprint(out, prompt)
+			line, rerr := in.ReadString('\n')
+			if rerr != nil && line == "" {
+				return ""
+			}
+			return strings.ToLower(strings.TrimSpace(line))
+		}
 		opts := hashcmd.Options{
 			Targets:     targets,
 			Extensions:  vip.GetStringSlice(config.KeyMediaExts),
@@ -80,16 +89,26 @@ confirmations.`,
 			AssumeYes:   vip.GetBool(config.KeyAssumeYes),
 			Force:       flagHashForce,
 			Recursive:   !flagHashNR,
-			Stdout:      cmd.OutOrStdout(),
+			Stdout:      out,
 			Stderr:      cmd.ErrOrStderr(),
 			Confirm: func(prompt string) (bool, error) {
-				fmt.Fprint(cmd.OutOrStdout(), prompt)
-				line, rerr := in.ReadString('\n')
-				if rerr != nil && line == "" {
-					return false, nil
+				a := readLine(prompt)
+				return a == "y" || a == "yes", nil
+			},
+			OnCollision: func(incoming, existing string) (hashcmd.CollisionAction, error) {
+				for {
+					switch readLine(fmt.Sprintf(
+						"  ! %s already exists. [o]verwrite / [s]kip (keep both) / [d]elete un-hashed file ? (default d) ",
+						existing)) {
+					case "o", "overwrite":
+						return hashcmd.CollisionOverwrite, nil
+					case "s", "skip":
+						return hashcmd.CollisionSkip, nil
+					case "", "d", "delete":
+						return hashcmd.CollisionDelete, nil
+					}
+					fmt.Fprintln(out, "  please answer o, s or d")
 				}
-				answer := strings.ToLower(strings.TrimSpace(line))
-				return answer == "y" || answer == "yes", nil
 			},
 		}
 		return hashcmd.Run(cmd.Context(), opts)
