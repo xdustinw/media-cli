@@ -239,7 +239,8 @@ each landing at `<target>/<path relative to that source>`. Folders are scanned
 recursively unless `--nr` is passed. `move` removes a source once its target is
 written; `copy` leaves it. A `move` across drives copies the bytes over and
 deletes the source only after verifying the copy — a failed move never loses the
-original.
+original. Once a `move` finishes, any source folder left empty (at any depth,
+including a source folder you named) is removed.
 
 Before writing anything, each source file's `.<6-hex>` short hash (from
 [`mc hash`](#mc-hash)) is looked up among the short hashes of the files
@@ -343,7 +344,8 @@ mc delete . --select='ext=tmp and size<1k'
 ```
 
 The matched files are shown as a TOON preview and confirmed before deletion,
-unless `-y`.
+unless `-y`. Any folder left empty by the deletions (at any depth) is removed
+too; the current directory and a filesystem root are never removed.
 
 ### `mc split`
 

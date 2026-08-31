@@ -130,6 +130,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     copied file is confirmed byte-count-identical. Any other rename failure is
     returned unchanged with the source left in place, so a failed move can never
     destroy the original.
+  - `mc move` and `mc delete` now remove folders left empty by the operation
+    (at any depth, including a folder named on the command line). The current
+    working directory and a filesystem root are never removed. New
+    `media.PruneEmptyDirs`.
 - **`mc list-missing <src-folder> <target-folder> [<target-folder> …]
   [--select=<expr>] [-y] [--nr]`** (alias `find-missing`): walks the source
   folder and lists every file whose `.<6-hex>` short hash (from `mc hash`) is on

@@ -126,6 +126,13 @@ func Run(ctx context.Context, o Options) error {
 		log.Info("delete", "file", t.path)
 	}
 
+	if removed > 0 {
+		for _, dir := range media.PruneEmptyDirs(o.Folders...) {
+			fmt.Fprintf(o.Stdout, "  ✓ removed empty folder %s\n", dir)
+			log.Info("delete", "removed_empty_dir", dir)
+		}
+	}
+
 	fmt.Fprintln(o.Stderr, media.Summary(removed, bytes, time.Since(start)))
 	if failed > 0 {
 		return fmt.Errorf("%d file(s) could not be deleted", failed)

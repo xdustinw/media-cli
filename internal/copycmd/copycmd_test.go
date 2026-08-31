@@ -290,6 +290,33 @@ func TestMoveDeleteSourceRemovesSkippedDuplicate(t *testing.T) {
 	}
 }
 
+// After a move drains a source subtree, the empty folders are cleaned up;
+// folders that still hold a file are left alone.
+func TestMoveRemovesEmptedSourceDirs(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "a", "b", "3-clip.aaaaaa.mp4"), "X") // matches --select, moves
+	write(t, filepath.Join(src, "keep", "9-clip.bbbbbb.mp4"), "Y")   // does not match, stays
+
+	out, _, err := run(t, Options{Sources: []string{src}, Target: dst, Move: true, Select: "name=3*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(src, "a")) {
+		t.Fatalf("src/a/b emptied by the move should be removed:\n%s", out)
+	}
+	if !exists(filepath.Join(src, "keep", "9-clip.bbbbbb.mp4")) {
+		t.Fatal("src/keep still has a file and must survive")
+	}
+	if !exists(src) {
+		t.Fatal("src still holds keep/ and must survive")
+	}
+	if !strings.Contains(out, "removed empty folder") {
+		t.Fatalf("expected a removed-folder notice:\n%s", out)
+	}
+}
+
 func TestConfirmAbortChangesNothing(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")

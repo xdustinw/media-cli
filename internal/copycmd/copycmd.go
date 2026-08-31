@@ -283,6 +283,13 @@ func Run(ctx context.Context, o Options) error {
 		log.Info(o.verb(), "src", p.src, "dup", p.dup, "mode", string(o.Mode))
 	}
 
+	if o.Move && (done > 0 || srcDeleted > 0) {
+		for _, dir := range media.PruneEmptyDirs(o.Sources...) {
+			fmt.Fprintf(o.Stdout, "  ✓ removed empty folder %s\n", dir)
+			log.Info("move", "removed_empty_dir", dir)
+		}
+	}
+
 	line := media.Summary(done, bytes, time.Since(start))
 	if skipped > 0 {
 		line += fmt.Sprintf("; %d duplicate(s) skipped", skipped)

@@ -66,6 +66,31 @@ func TestDeletesOnlyMatches(t *testing.T) {
 	}
 }
 
+func TestRemovesFoldersLeftEmpty(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "sub", "only.tmp"), "x") // sub/ becomes empty
+	write(t, filepath.Join(root, "mixed", "a.tmp"), "y")  // mixed/ keeps b.jpg
+	write(t, filepath.Join(root, "mixed", "b.jpg"), "z")
+	write(t, filepath.Join(root, "deep", "a", "b", "c.tmp"), "w") // whole chain empties
+
+	out, _, err := run(t, Options{Folders: []string{root}, Select: "ext=tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(root, "sub")) {
+		t.Fatalf("sub/ was emptied and should be removed:\n%s", out)
+	}
+	if exists(filepath.Join(root, "deep")) {
+		t.Fatal("deep/a/b and its parents should all be removed")
+	}
+	if !exists(filepath.Join(root, "mixed", "b.jpg")) {
+		t.Fatal("mixed/ still holds b.jpg and must survive")
+	}
+	if !strings.Contains(out, "removed empty folder") {
+		t.Fatalf("expected a removed-folder notice:\n%s", out)
+	}
+}
+
 func TestNonRecursive(t *testing.T) {
 	root := t.TempDir()
 	write(t, filepath.Join(root, "a.tmp"), "x")
