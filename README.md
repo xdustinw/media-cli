@@ -67,6 +67,7 @@ the old `mc.exe` as `mc-<version>.exe`).
 | [`mc list`](#mc-list) | List a folder's media with size and metadata, filter & sort |
 | [`mc set`](#mc-set) | Write chosen metadata onto matching files in a folder |
 | [`mc copy`](#mc-copy--mc-move) / [`mc move`](#mc-copy--mc-move) | Bring files into a folder, resolving name-hash duplicates |
+| [`mc dedupe`](#mc-dedupe) | Delete duplicate copies of hash-named files across folders |
 | [`mc info`](#mc-info) | Dump everything known about one file |
 | [`mc update`](#mc-update) | Update `mc` to the latest release |
 | [`mc version`](#mc-version) | Print version and bundled-FFmpeg info |
@@ -171,8 +172,8 @@ $ mc list tmp --meta=mc.hash,rating
 - `--format` – `toon` (default), `json`, or `csv`.
 - `-r` / `--recursive` – descend into subfolders (off by default).
 
-Every command that walks files (`hash`, `list`, `set`, `info`) prints a one-line
-summary to stderr when it finishes, e.g.
+Every command that walks files (`hash`, `list`, `set`, `info`, `copy`, `move`,
+`dedupe`) prints a one-line summary to stderr when it finishes, e.g.
 `processed 12 file(s) in 3.4s (28.1 MB/s)` (runs over a minute read as
 `2m 5s`).
 
@@ -247,6 +248,32 @@ mc copy ~/incoming ~/library --select='name=IMG_*'
 hash compare, unless `-y`. `-y` also skips the final confirmation. A source file
 whose destination path is already taken by a *non-duplicate* is skipped (never
 overwritten). The full plan is shown as a TOON preview before anything happens.
+
+### `mc dedupe`
+
+```
+mc dedupe <folder> [<folder> ...] [-m <method>] [--select=<expr>] [-y] [--nr]
+```
+
+Groups files by the `.<6-hex>` short hash in their name (from
+[`mc hash`](#mc-hash)) across the given folders, then **deletes all but one
+copy** of each set. Folders are scanned recursively unless `--nr`.
+
+| `-m` / `--method` | which copy is kept |
+| --- | --- |
+| `i` / `interactive` *(default)* | you're shown each set and pick which to keep (`1`-`n`), or `s` to skip that set |
+| `l` / `longer-name` | the file with the longest name |
+| `n` / `newer` | the most recently modified |
+| `o` / `older` | the oldest |
+
+```bash
+mc dedupe ~/Photos ~/Backup/Photos            # review each set by hand
+mc dedupe ~/Photos ~/Backup -m newer -y       # keep the newest, no prompts
+mc dedupe ~/Photos --select='name=IMG_*' -m longer-name
+```
+
+The full list of deletions is shown as a TOON preview and confirmed before
+anything is removed, unless `-y`.
 
 ### `mc info`
 

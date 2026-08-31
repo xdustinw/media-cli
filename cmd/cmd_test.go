@@ -43,6 +43,7 @@ func TestListInfoHelp(t *testing.T) {
 		{"set", "key=value"},
 		{"copy", "duplicate"},
 		{"move", "duplicate"},
+		{"dedupe", "keep"},
 	} {
 		var out bytes.Buffer
 		rootCmd.SetOut(&out)

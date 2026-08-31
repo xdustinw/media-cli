@@ -108,6 +108,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shown as a TOON preview first. New package `internal/copycmd`;
   `media.CopyFile` / `media.MoveFile` / `media.WalkFiles` / `media.DiscoverMany`
   / `media.Facts`.
+- **`mc dedupe <folder> [<folder> ...] [-m <method>] [--select=<expr>] [-y] [--nr]`**:
+  groups files by the `.<6-hex>` short hash in their name (from `mc hash`, no
+  metadata read) across the folders and deletes all but one copy of each set.
+  Folders are scanned recursively unless `--nr`. `-m` / `--method` chooses the
+  keeper: `interactive` (default — pick per set, or skip it), `longer-name`,
+  `newer`, or `older`. `--select` filters the files. The deletions are shown as
+  a TOON preview and confirmed unless `-y`. New package `internal/dedupecmd`.
 - **`mc info <file> [--format=toon|json]`**: full dump of one file — path, size,
   modified time; container/codec details per stream; every metadata entry
   (image EXIF / PNG text included, Windows XP* tags decoded, binary thumbnail
