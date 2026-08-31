@@ -15,14 +15,15 @@ import (
 )
 
 var (
-	flagCopyMode   string
-	flagCopyYes    bool
-	flagCopyNR     bool
-	flagCopySelect string
-	flagMoveMode   string
-	flagMoveYes    bool
-	flagMoveNR     bool
-	flagMoveSelect string
+	flagCopyMode      string
+	flagCopyYes       bool
+	flagCopyNR        bool
+	flagCopySelect    string
+	flagMoveMode      string
+	flagMoveYes       bool
+	flagMoveNR        bool
+	flagMoveSelect    string
+	flagMoveDeleteSrc bool
 )
 
 const copyMoveLong = `%[1]s brings every file from the source(s) — files and/or folders — into
@@ -53,7 +54,7 @@ var copyCmd = &cobra.Command{
 var moveCmd = &cobra.Command{
 	Use:   "move <source> [<source> ...] <target>",
 	Short: "Move files into a folder, resolving name-hash duplicates",
-	Long:  fmt.Sprintf(copyMoveLong, "move", "Files are moved; a source is removed once its target is written. On a skipped duplicate the source is left in place (not deleted)."),
+	Long:  fmt.Sprintf(copyMoveLong, "move", "Files are moved; a source is removed once its target is written. On a skipped duplicate the source is left in place (not deleted) unless --delete-source is passed, which removes every matching source regardless of a duplicate under the target."),
 	Args:  cobra.MinimumNArgs(2),
 	RunE:  runCopyMove(true),
 }
@@ -78,15 +79,16 @@ func runCopyMove(move bool) func(*cobra.Command, []string) error {
 		in := bufio.NewReader(cmd.InOrStdin())
 		out := cmd.OutOrStdout()
 		return copycmd.Run(cmd.Context(), copycmd.Options{
-			Sources:   sources,
-			Target:    target,
-			Move:      move,
-			Mode:      mode,
-			Select:    sel,
-			Recursive: !nr,
-			AssumeYes: vip.GetBool(config.KeyAssumeYes),
-			Stdout:    out,
-			Stderr:    cmd.ErrOrStderr(),
+			Sources:      sources,
+			Target:       target,
+			Move:         move,
+			Mode:         mode,
+			Select:       sel,
+			Recursive:    !nr,
+			DeleteSource: move && flagMoveDeleteSrc,
+			AssumeYes:    vip.GetBool(config.KeyAssumeYes),
+			Stdout:       out,
+			Stderr:       cmd.ErrOrStderr(),
 			Confirm: func(prompt string) (bool, error) {
 				fmt.Fprint(out, prompt)
 				line, rerr := in.ReadString('\n')
@@ -121,4 +123,6 @@ func init() {
 		c.cmd.Flags().StringVar(c.sel, "select", "", "only act on source files matching this filter")
 		rootCmd.AddCommand(c.cmd)
 	}
+	moveCmd.Flags().BoolVar(&flagMoveDeleteSrc, "delete-source", false,
+		"delete matching source files even when the target already holds a duplicate")
 }

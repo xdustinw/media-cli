@@ -45,6 +45,7 @@ func TestListInfoHelp(t *testing.T) {
 		{"move", "duplicate"},
 		{"dedupe", "keep"},
 		{"delete", "--select"},
+		{"list-missing", "target"},
 		{"split", "timestamp"},
 		{"concat", "re-encode"},
 	} {

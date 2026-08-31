@@ -68,6 +68,7 @@ the old `mc.exe` as `mc-<version>.exe`).
 | [`mc set`](#mc-set) | Write chosen metadata onto matching files in a folder |
 | [`mc copy`](#mc-copy--mc-move) / [`mc move`](#mc-copy--mc-move) | Bring files into a folder, resolving name-hash duplicates |
 | [`mc dedupe`](#mc-dedupe) | Delete duplicate copies of hash-named files across folders |
+| [`mc list-missing`](#mc-list-missing) | List a folder's files whose content hash is in no target folder |
 | [`mc delete`](#mc-delete) | Delete files under folders that match a `--select` filter |
 | [`mc split`](#mc-split) | Cut a media file at timestamps into numbered parts |
 | [`mc concat`](#mc-concat) | Join media files into one |
@@ -254,7 +255,12 @@ mc copy ~/incoming ~/library                  # skip duplicates (default)
 mc move ~/cam1 ~/cam2 ~/library -m keep-both   # merge two folders, keep every copy
 mc move ~/incoming ~/library -y                # no prompts
 mc copy ~/incoming ~/library --select='name=IMG_*'
+mc move ~/incoming ~/library --delete-source   # drain the source even where a copy already exists
 ```
+
+**`--delete-source`** (`move` only) deletes every matching source file even when
+the target already holds a content duplicate and the mode is `skip-duplicate` —
+so the source folder ends up empty regardless. It respects `--select`.
 
 **`--select`** filters the source files (`name`, `path`, `ext`, `size`,
 `modifiedAt`, `kind`); you're shown the matches and asked to confirm before the
@@ -295,6 +301,29 @@ Files without a `.<6-hex>` slot are offered to `mc hash` first (or, with `-y`,
 hashed automatically); decline and they're grouped by **file name** instead.
 The full list of deletions is shown as a TOON preview and confirmed before
 anything is removed, unless `-y`.
+
+### `mc list-missing`
+
+```
+mc list-missing <src-folder> <target-folder> [<target-folder> ...] [--select=<expr>] [-y] [--nr]
+```
+
+Walks `<src-folder>` and prints every file whose `.<6-hex>` short hash (from
+[`mc hash`](#mc-hash)) is **not present on any file** under the target
+folder(s) — i.e. what you still need to copy over. The source folder is scanned
+recursively unless `--nr`; target folders are always recursive. Nothing is
+modified (aside from an accepted hash pass). `find-missing` is an alias.
+
+```bash
+mc list-missing ~/Phone/DCIM ~/Photos                    # what's on the phone but not filed
+mc list-missing ~/inbox ~/library ~/archive -y           # check against two libraries
+mc list-missing ~/inbox ~/library --select='kind=video'
+```
+
+Files without a `.<6-hex>` slot (in the source or a target) are offered to
+`mc hash` first (or, with `-y`, hashed automatically); decline and the
+comparison falls back to the **base file name**. Missing files are printed as a
+TOON table (`file`, `hash`, `size`).
 
 ### `mc delete`
 

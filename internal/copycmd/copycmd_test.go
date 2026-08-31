@@ -258,6 +258,38 @@ func TestUnhashedAutoHashedUnderY(t *testing.T) {
 	}
 }
 
+// move --delete-source removes a duplicate source even under skip-duplicate.
+func TestMoveDeleteSourceRemovesSkippedDuplicate(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	dst := filepath.Join(root, "dst")
+	write(t, filepath.Join(src, "dup.abcabc.mp4"), "SRC")   // duplicate of the target
+	write(t, filepath.Join(src, "fresh.bbbbbb.mp4"), "NEW") // not a duplicate
+	write(t, filepath.Join(dst, "have", "old.abcabc.mp4"), "TGT")
+
+	out, errOut, err := run(t, Options{
+		Sources: []string{src}, Target: dst, Move: true, DeleteSource: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(dst, "have", "old.abcabc.mp4")) != "TGT" {
+		t.Fatal("skip-duplicate must still leave the target bytes alone")
+	}
+	if exists(filepath.Join(src, "dup.abcabc.mp4")) {
+		t.Fatalf("--delete-source must remove the duplicate source:\n%s", out)
+	}
+	if !exists(filepath.Join(dst, "fresh.bbbbbb.mp4")) {
+		t.Fatal("the non-duplicate source should still be moved in")
+	}
+	if exists(filepath.Join(src, "fresh.bbbbbb.mp4")) {
+		t.Fatal("the non-duplicate source should be gone after a move")
+	}
+	if !strings.Contains(errOut, "duplicate source(s) deleted") {
+		t.Fatalf("summary should note the deleted source:\n%s", errOut)
+	}
+}
+
 func TestConfirmAbortChangesNothing(t *testing.T) {
 	root := t.TempDir()
 	src := filepath.Join(root, "src")

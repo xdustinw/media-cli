@@ -121,6 +121,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   overwritten. The plan is shown as a TOON preview first. New package
   `internal/copycmd`; `media.CopyFile` / `media.MoveFile` / `media.WalkFiles` /
   `media.DiscoverMany` / `media.Facts`; `hashcmd.HashInPlace`.
+  - `mc move` gained `--delete-source`: deletes every matching source file even
+    when the target already holds a content duplicate under `skip-duplicate`, so
+    the source folder is drained regardless. Honours `--select`.
+- **`mc list-missing <src-folder> <target-folder> [<target-folder> …]
+  [--select=<expr>] [-y] [--nr]`** (alias `find-missing`): walks the source
+  folder and lists every file whose `.<6-hex>` short hash (from `mc hash`) is on
+  no file under any target folder. The source is scanned recursively unless
+  `--nr`; targets are always recursive; a non-existent target is treated as
+  empty. Unhashed files on either side are offered to `mc hash` first (`-y`
+  hashes them); declined, the comparison falls back to the base file name.
+  Read-only aside from an accepted hash pass; results print as a TOON table. New
+  package `internal/listmissingcmd`.
 - **`mc dedupe [folder ...] [-m <method>] [--select=<expr>] [-y] [--nr]`**:
   groups files by the `.<6-hex>` short hash in their name (from `mc hash`, no
   metadata read) across the folders (default: the current directory) and deletes

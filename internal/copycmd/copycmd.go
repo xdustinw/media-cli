@@ -59,6 +59,10 @@ type Options struct {
 	Mode      Mode // "" => ModeSkipDuplicate
 	Select    string
 	Recursive bool // descend into source subfolders
+	// DeleteSource (move only) removes every matching source file even when a
+	// content duplicate already sits under the target and the mode is
+	// skip-duplicate. Modes overwrite / keep-both already consume the source.
+	DeleteSource bool
 
 	AssumeYes bool
 	Stdout    io.Writer
@@ -243,7 +247,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 
 	start := time.Now()
-	var done, skipped int
+	var done, skipped, srcDeleted int
 	var bytes int64
 	var applyErrs int
 	for _, p := range append(append([]plan{}, plains...), dups...) {
@@ -251,6 +255,19 @@ func Run(ctx context.Context, o Options) error {
 			return err
 		}
 		if p.dup && o.Mode == ModeSkipDuplicate {
+			if o.Move && o.DeleteSource {
+				sz := fileSize(p.src)
+				if rerr := removeFile(p.src); rerr != nil {
+					applyErrs++
+					fmt.Fprintf(o.Stderr, "  ! %s: %v\n", p.rel, rerr)
+					continue
+				}
+				srcDeleted++
+				bytes += sz
+				fmt.Fprintf(o.Stdout, "  ✓ %s  (duplicate; source deleted)\n", p.rel)
+				log.Info("move", "src", p.src, "dup", true, "deleted_source", true)
+				continue
+			}
 			skipped++
 			continue
 		}
@@ -269,6 +286,9 @@ func Run(ctx context.Context, o Options) error {
 	line := media.Summary(done, bytes, time.Since(start))
 	if skipped > 0 {
 		line += fmt.Sprintf("; %d duplicate(s) skipped", skipped)
+	}
+	if srcDeleted > 0 {
+		line += fmt.Sprintf("; %d duplicate source(s) deleted", srcDeleted)
 	}
 	fmt.Fprintln(o.Stderr, line)
 	if applyErrs > 0 {
@@ -321,6 +341,9 @@ func preview(o Options, byPath bool, plains, dups []plan) {
 	doc.AddField("sources", strings.Join(o.Sources, ", "))
 	doc.AddField("target", o.Target)
 	doc.AddField("duplicate-mode", string(o.Mode))
+	if o.Move && o.DeleteSource {
+		doc.AddField("delete-source", "yes (even on skipped duplicates)")
+	}
 	if byPath {
 		doc.AddField("compared-by", "relative path")
 	} else {
@@ -358,6 +381,9 @@ func dupAction(o Options, p plan) string {
 		}
 		return "keep both (copy source in as " + filepath.Base(p.dst) + ")"
 	default:
+		if o.Move && o.DeleteSource {
+			return "skip target, delete source"
+		}
 		if o.Move {
 			return "skip (source kept, not deleted)"
 		}
